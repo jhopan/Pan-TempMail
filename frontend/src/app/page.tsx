@@ -9,7 +9,7 @@ type Message = { id: number; sender: string; subject: string; text_body: string;
 type Attachment = { id: number; filename: string; content_type: string; size: number };
 
 const DOMAINS = [
-  "__PRIMARY_DOMAIN__",
+  "renunganbot.qzz.io",
   // Tambah domain baru di sini, contoh:
   // "mailku.my.id",
   // "tempmail.co.id",
@@ -29,7 +29,8 @@ export default function Home() {
   const [sseStatus, setSseStatus] = useState("connecting");
   const sseRef = useRef<EventSource | null>(null);
 
-  const { user, loading: authLoading } = useAuth();
+  const { user, token, loading: authLoading } = useAuth();
+  const authHeaders = (): Record<string, string> => token ? { Authorization: "Bearer " + token } : {};
   const router = useRouter();
 
   useEffect(() => {
@@ -69,7 +70,7 @@ export default function Home() {
   const loadInbox = useCallback(async () => {
     if (!currentEmail) return;
     try {
-      const res = await fetch("/api/inbox/" + encodeURIComponent(currentEmail));
+      const res = await fetch("/api/inbox/" + encodeURIComponent(currentEmail), { headers: authHeaders() });
       if (!res.ok) return;
       const data = await res.json();
       setMessages(Array.isArray(data) ? data : []);
@@ -80,7 +81,7 @@ export default function Home() {
     if (!currentEmail) return;
     if (sseRef.current) sseRef.current.close();
     setSseStatus("connecting");
-    const es = new EventSource("/api/sse/" + encodeURIComponent(currentEmail));
+    const es = new EventSource("/api/sse/" + encodeURIComponent(currentEmail) + "?token=" + encodeURIComponent(token || ""));
     sseRef.current = es;
     es.addEventListener("connected", () => setSseStatus("live"));
     es.addEventListener("new_email", () => { loadInbox(); });
@@ -115,7 +116,7 @@ export default function Home() {
   async function openMessage(id: number) {
     setLoading(true);
     try {
-      const [msgRes, attRes] = await Promise.all([fetch("/api/message/" + id), fetch("/api/message/" + id + "/attachments")]);
+      const [msgRes, attRes] = await Promise.all([fetch("/api/message/" + id, { headers: authHeaders() }), fetch("/api/message/" + id + "/attachments", { headers: authHeaders() })]);
       setSelected(await msgRes.json());
       const attData = await attRes.json();
       setAttachments(Array.isArray(attData) ? attData : []);
@@ -124,12 +125,12 @@ export default function Home() {
   }
   async function deleteMessage(id: number) {
     if (!confirm("Delete this message?")) return;
-    await fetch("/api/message/" + id, { method: "DELETE" });
+    await fetch("/api/message/" + id, { method: "DELETE", headers: authHeaders() });
     setSelected(null); setAttachments([]); loadInbox();
   }
   async function deleteInbox() {
     if (!confirm("Delete all messages for " + currentEmail + "?")) return;
-    await fetch("/api/inbox/" + encodeURIComponent(currentEmail), { method: "DELETE" });
+    await fetch("/api/inbox/" + encodeURIComponent(currentEmail), { method: "DELETE", headers: authHeaders() });
     setSelected(null); setAttachments([]); setMessages([]);
   }
   function formatSize(bytes: number) {

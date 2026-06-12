@@ -138,6 +138,7 @@ while true; do
     8) reset_password ;;
     9) add_domain ;;
     10) backup_db ;;
+    11) bash "/scripts/enable-https.sh" ;;
     0) echo "Bye!"; exit 0 ;;
     *) echo -e "  ${RED}Pilihan tidak valid${NC}" ;;
   esac

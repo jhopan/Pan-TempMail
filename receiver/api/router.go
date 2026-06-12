@@ -175,16 +175,19 @@ func SetupRouter() *gin.Engine {
 		admin.DELETE("/users/:id", authHandler.DeleteUser)
 	}
 
-	// API routes with rate limiting
-	r.GET("/inbox/:email", apiMW, handlers.GetInbox)
-	r.DELETE("/inbox/:email", delMW, handlers.DeleteInbox)
-	r.GET("/message/:id", apiMW, handlers.GetMessage)
-	r.DELETE("/message/:id", delMW, handlers.DeleteMessage)
-	r.GET("/message/:id/attachments", apiMW, handlers.GetMessageAttachments)
-	r.GET("/attachment/:id", apiMW, handlers.GetAttachment)
+	// Protected API routes (require authentication)
+	authAPI := r.Group("/")
+	authAPI.Use(middleware.AuthMiddleware())
+	{
+	authAPI.GET("/inbox/:email", apiMW, handlers.GetInbox)
+	authAPI.DELETE("/inbox/:email", delMW, handlers.DeleteInbox)
+	authAPI.GET("/message/:id", apiMW, handlers.GetMessage)
+	authAPI.DELETE("/message/:id", delMW, handlers.DeleteMessage)
+	authAPI.GET("/message/:id/attachments", apiMW, handlers.GetMessageAttachments)
+	authAPI.GET("/attachment/:id", apiMW, handlers.GetAttachment)
 
-	// SSE (no rate limit, long-lived connection)
-	r.GET("/sse/:email", SSEHandler)
+		authAPI.GET("/sse/:email", SSEHandler)
+	}
 
 	return r
 }
