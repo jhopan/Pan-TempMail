@@ -7,8 +7,8 @@ YELLOW='\033[1;33m'
 CYAN='\033[0;36m'
 NC='\033[0m'
 
-SERVER_IP="213.35.108.142"
-MAIL_HOST="mail.renunganbot.qzz.io"
+SERVER_IP="__SERVER_IP__"
+MAIL_HOST="__MAIL_HOST__"
 MADDY_CONF="/etc/maddy/maddy.conf"
 PAGE_TSX="/opt/mail-platform/frontend-backup-zh/src/app/page.tsx"
 HELPER="/opt/mail-platform/maddy-add-domain.py"
@@ -141,7 +141,7 @@ mkrecord "MX" "$DOMAIN" "$MAIL_HOST" "10" ""
 mkrecord "A" "mail.$DOMAIN" "$SERVER_IP" "" "false"
 mkrecord "A" "$DOMAIN" "$SERVER_IP" "" "false"
 mkrecord "TXT" "$DOMAIN" "v=spf1 ip4:${SERVER_IP} ~all" "" ""
-mkrecord "TXT" "_dmarc.$DOMAIN" "v=DMARC1; p=none; rua=mailto:admin@renunganbot.qzz.io" "" ""
+mkrecord "TXT" "_dmarc.$DOMAIN" "v=DMARC1; p=none; rua=mailto:admin@__PRIMARY_DOMAIN__" "" ""
 
 echo -e "${GREEN}[2/5]${NC} DNS records done!"
 

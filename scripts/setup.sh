@@ -200,15 +200,15 @@ configure_services() {
   read -p "  Primary domain (e.g. mail.example.com): " DOMAIN
 
   local JWT_SECRET
-  JWT_SECRET=$(openssl rand -hex 32)
+  JWT_SECRET=*** 9b7d1dde5e66918fff76e5f6963fc328c5840ec5715deb43bbb4b816a900d9
 
   cat > "${PROJECT_DIR}/receiver/.env" << EOF
 DB_HOST=localhost
 DB_PORT=5432
 DB_USER=tempmail
-DB_PASSWORD=${DB_PASS}
+DB_PASSWORD=***
 DB_NAME=tempmail
-JWT_SECRET=${JWT_SECRET}
+JWT_SECRET=***
 PORT=8080
 LMTP_PORT=8024
 DOMAINS=${DOMAIN}
@@ -220,6 +220,19 @@ EOF
   sed -i "s/renunganbot.qzz.io/${DOMAIN}/g" /etc/maddy/maddy.conf
   chown -R maddy:maddy /etc/maddy /var/lib/maddy
   log "Maddy configured"
+
+  # Replace placeholders in frontend
+  sed -i "s/__PRIMARY_DOMAIN__/${DOMAIN}/g" "${PROJECT_DIR}/frontend/src/app/page.tsx"
+
+  # Replace placeholders in add-domain.sh
+  sed -i "s/__SERVER_IP__/${SERVER_IP}/g" "${PROJECT_DIR}/scripts/add-domain.sh"
+  sed -i "s/__MAIL_HOST__/mail.${DOMAIN}/g" "${PROJECT_DIR}/scripts/add-domain.sh"
+  sed -i "s/__PRIMARY_DOMAIN__/${DOMAIN}/g" "${PROJECT_DIR}/scripts/add-domain.sh"
+
+  # Replace placeholders in router.go CORS
+  sed -i "s|http://localhost:3000|http://${SERVER_IP}, http://${SERVER_IP}:3000, http://localhost:3000|g" "${PROJECT_DIR}/receiver/api/router.go"
+
+  log "All placeholders replaced"
 
   # --- Nginx ---
   cp "${PROJECT_DIR}/config/nginx/tempmail" /etc/nginx/sites-available/tempmail
@@ -308,6 +321,7 @@ install_maddy
 install_nginx
 install_python_deps
 configure_services
+setup_cloudflare
 setup_firewall
 
 echo ""

@@ -9,7 +9,7 @@ type Message = { id: number; sender: string; subject: string; text_body: string;
 type Attachment = { id: number; filename: string; content_type: string; size: number };
 
 const DOMAINS = [
-  "renunganbot.qzz.io",
+  "__PRIMARY_DOMAIN__",
   // Tambah domain baru di sini, contoh:
   // "mailku.my.id",
   // "tempmail.co.id",
