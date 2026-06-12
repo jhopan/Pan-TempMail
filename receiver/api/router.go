@@ -121,7 +121,7 @@ func SetupRouter() *gin.Engine {
 	r := gin.Default()
 
 	r.Use(cors.New(cors.Config{
-		AllowOrigins:     []string{"http://localhost:3000"},
+		AllowOrigins:     []string{"http://213.35.108.142:3000", "http://213.35.108.142", "http://localhost:3000"},
 		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
 		AllowHeaders:     []string{"Origin", "Content-Type", "Accept", "Authorization"},
 		MaxAge:           12 * time.Hour,
@@ -129,11 +129,17 @@ func SetupRouter() *gin.Engine {
 
 	// Rate limiters
 	apiRate, _ := limiter.NewRateFromFormatted("60-M")   // 60 req/min per IP
-	delRate, _ := limiter.NewRateFromFormatted("20-M")    // 20 deletes/min per IP
+	delRate, _ := limiter.NewRateFromFormatted("20-M")
+	loginRate, _ := limiter.NewRateFromFormatted("5-M")  // 5 login attempts/min
+	adminRate, _ := limiter.NewRateFromFormatted("30-M") // 30 admin req/min    // 20 deletes/min per IP
 
 	apiStore := memory.NewStore()
 	delStore := memory.NewStore()
 
+	loginStore := memory.NewStore()
+	loginLimiter := limiter.New(loginStore, loginRate)
+	adminStore := memory.NewStore()
+	adminLimiter := limiter.New(adminStore, adminRate)
 	apiLimiter := limiter.New(apiStore, apiRate)
 	delLimiter := limiter.New(delStore, delRate)
 
@@ -147,7 +153,8 @@ func SetupRouter() *gin.Engine {
 	r.GET("/health", handlers.Health)
 
 	// Auth routes (public)
-	r.POST("/api/auth/login", authHandler.Login)
+	loginMW := ginLimiterMiddleware(loginLimiter)
+	r.POST("/api/auth/login", loginMW, authHandler.Login)
 
 	// Protected routes (require authentication)
 	protected := r.Group("/api")
@@ -158,7 +165,8 @@ func SetupRouter() *gin.Engine {
 
 	// Admin routes (require admin role)
 	admin := r.Group("/api/admin")
-	admin.Use(middleware.AuthMiddleware(), middleware.AdminMiddleware())
+	adminMW := ginLimiterMiddleware(adminLimiter)
+	admin.Use(middleware.AuthMiddleware(), middleware.AdminMiddleware(), adminMW)
 	{
 		admin.POST("/users", authHandler.Register)
 		admin.GET("/users", authHandler.GetAllUsers)

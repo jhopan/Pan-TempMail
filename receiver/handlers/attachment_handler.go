@@ -49,7 +49,7 @@ func GetMessageAttachments(c *gin.Context) {
 
 	attachments, err := repository.GetAttachmentsByMessageID(database.Conn, messageID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Internal server error"})
 		return
 	}
 

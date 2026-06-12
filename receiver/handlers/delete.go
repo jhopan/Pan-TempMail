@@ -19,7 +19,7 @@ func DeleteMessage(c *gin.Context) {
 
 	err = repository.DeleteMessage(database.Conn, id)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Internal server error"})
 		return
 	}
 
@@ -31,7 +31,7 @@ func DeleteInbox(c *gin.Context) {
 
 	err := repository.DeleteInbox(database.Conn, email)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Internal server error"})
 		return
 	}
 
