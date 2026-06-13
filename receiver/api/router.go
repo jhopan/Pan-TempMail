@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net/http"
+	"os"
 	"sync"
 	"time"
 
@@ -13,6 +15,7 @@ import (
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/ulule/limiter/v3"
 	"github.com/ulule/limiter/v3/drivers/store/memory"
 )
@@ -117,6 +120,36 @@ func ginLimiterMiddleware(lmt *limiter.Limiter) gin.HandlerFunc {
 	}
 }
 
+
+// sseAuthMiddleware validates JWT from query param for SSE connections
+func sseAuthMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		tokenStr := c.Query("token")
+		if tokenStr == "" {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "Token required"})
+			c.Abort()
+			return
+		}
+		secret := os.Getenv("JWT_SECRET")
+		if secret == "" {
+			secret = "tempmail-secret-key-change-me"
+		}
+		claims := &middleware.JWTClaims{}
+		token, err := jwt.ParseWithClaims(tokenStr, claims, func(t *jwt.Token) (interface{}, error) {
+			return []byte(secret), nil
+		})
+		if err != nil || !token.Valid {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid token"})
+			c.Abort()
+			return
+		}
+		c.Set("user_id", claims.UserID)
+		c.Set("email", claims.Email)
+		c.Set("role", claims.Role)
+		c.Next()
+	}
+}
+
 func SetupRouter() *gin.Engine {
 	r := gin.Default()
 
@@ -185,9 +218,10 @@ func SetupRouter() *gin.Engine {
 	authAPI.DELETE("/message/:id", delMW, handlers.DeleteMessage)
 	authAPI.GET("/message/:id/attachments", apiMW, handlers.GetMessageAttachments)
 	authAPI.GET("/attachment/:id", apiMW, handlers.GetAttachment)
-
-		authAPI.GET("/sse/:email", SSEHandler)
 	}
+
+	// SSE route - auth via query param (EventSource cannot send custom headers)
+	r.GET("/sse/:email", sseAuthMiddleware(), SSEHandler)
 
 	return r
 }
