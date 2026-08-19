@@ -1,12 +1,10 @@
 # ==========================================
 # TempMail Ultra-Light — Multi-stage Dockerfile
-# Final image: ~20MB (Alpine + single Go binary)
+# Final image: ~20MB (Alpine + single Go binary, no CGO)
 # ==========================================
 
 # --- Stage 1: Build ---
 FROM golang:1.25-alpine AS builder
-
-RUN apk add --no-cache git gcc musl-dev
 
 WORKDIR /app
 
@@ -17,14 +15,13 @@ RUN go mod download
 # Copy source code
 COPY receiver/ ./
 
-# Build static binary (CGO disabled for static linking)
-# Note: go-sqlite3 needs CGO, so we keep it enabled
-RUN CGO_ENABLED=1 GOOS=linux go build -ldflags="-s -w -extldflags=-static" -o /tempmail .
+# Build static binary (CGO disabled — pure Go, no gcc needed)
+RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /tempmail .
 
 # --- Stage 2: Runtime ---
 FROM alpine:3.20
 
-RUN apk add --no-cache ca-certificates sqlite-libs tzdata
+RUN apk add --no-cache ca-certificates tzdata
 ENV TZ=Asia/Jakarta
 
 WORKDIR /app

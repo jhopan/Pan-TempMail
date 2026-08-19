@@ -219,6 +219,50 @@ func Health(c *gin.Context) {
 	})
 }
 
+// SeedAdmin creates the first admin user. Only works if no users exist.
+// POST /api/setup {"email":"admin@example.com","password":"..."}
+func SeedAdmin(c *gin.Context) {
+	// Check if any user exists
+	var count int
+	db := database.Conn()
+	if err := db.QueryRowContext(c.Request.Context(), "SELECT COUNT(*) FROM users").Scan(&count); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Database error"})
+		return
+	}
+	if count > 0 {
+		c.JSON(http.StatusConflict, gin.H{"error": "Setup already completed — users exist"})
+		return
+	}
+
+	var req struct {
+		Email    string `json:"email" binding:"required,email"`
+		Password string `json:"password" binding:"required,min=6"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request. email and password(min 6 chars) required"})
+		return
+	}
+
+	repo := repository.NewUserRepository()
+	hashedPassword, err := repository.HashPassword(req.Password)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to hash password"})
+		return
+	}
+
+	user, err := repo.Create(c.Request.Context(), req.Email, hashedPassword, "admin")
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create admin user"})
+		return
+	}
+
+	c.JSON(http.StatusCreated, gin.H{
+		"message": "Admin user created successfully",
+		"user":    user,
+		"hint":    "Now login via POST /api/auth/login",
+	})
+}
+
 func randomString(length int) string {
 	const charset = "abcdefghijklmnopqrstuvwxyz0123456789"
 	sb := make([]byte, length)

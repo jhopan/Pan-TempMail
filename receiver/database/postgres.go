@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	_ "github.com/mattn/go-sqlite3"
+	_ "modernc.org/sqlite" // Pure-Go SQLite, no CGO needed
 )
 
 var (
@@ -39,7 +39,7 @@ func Connect() error {
 			os.Getenv("DB_NAME"),
 		)
 	default:
-		dbDriver = "sqlite3"
+		dbDriver = "sqlite"
 		dbPath := os.Getenv("DB_PATH")
 		if dbPath == "" {
 			// Default: data/tempmail.db relative to working dir
@@ -49,7 +49,7 @@ func Connect() error {
 		if err := os.MkdirAll(filepath.Dir(dbPath), 0755); err != nil {
 			return fmt.Errorf("create db directory: %w", err)
 		}
-		dsn = dbPath + "?_journal_mode=WAL&_busy_timeout=5000&_sync=NORMAL&_foreign_keys=on"
+		dsn = dbPath + "?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=synchronous(NORMAL)&_pragma=foreign_keys(on)"
 	}
 
 	db, err := sql.Open(dbDriver, dsn)

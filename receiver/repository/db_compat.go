@@ -6,18 +6,18 @@ import (
 	"os"
 )
 
-// dbDriverName returns "postgres" or "sqlite3" based on DB_DRIVER env.
+// dbDriverName returns "postgres" or "sqlite" based on DB_DRIVER env.
 func dbDriverName() string {
 	d := os.Getenv("DB_DRIVER")
 	if d == "postgres" {
 		return "postgres"
 	}
-	return "sqlite3"
+	return "sqlite"
 }
 
 // placeholder converts $1, $2 to ? for SQLite, keeps $1, $2 for PostgreSQL.
 func placeholder(query string) string {
-	if dbDriverName() == "sqlite3" {
+	if dbDriverName() == "sqlite" {
 		// Replace $1, $2, $3... with ?
 		return strconvQuote(query)
 	}

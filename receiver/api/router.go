@@ -224,6 +224,9 @@ func SetupRouter() *gin.Engine {
 	// Public config endpoint (for frontend to read domains)
 	r.GET("/api/config", web.ConfigHandler)
 
+	// First-time admin seed (only works if no admin exists)
+	r.POST("/api/setup", handlers.SeedAdmin)
+
 	// Static frontend (embedded HTML/JS/CSS)
 	r.StaticFS("/app", web.StaticFS())
 
@@ -256,7 +259,7 @@ func SetupRouter() *gin.Engine {
 	}
 
 	// Protected API routes (require authentication)
-	authAPI := r.Group("/")
+	authAPI := r.Group("/api")
 	authAPI.Use(middleware.AuthMiddleware())
 	{
 		// Inbox endpoints
