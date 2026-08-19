@@ -7,9 +7,9 @@ import (
 	"net/http"
 	"os"
 	"strings"
-	"sync"
 	"time"
 
+	"receiver/events"
 	"receiver/handler"
 	"receiver/handlers"
 	"receiver/middleware"
@@ -22,54 +22,8 @@ import (
 	"github.com/ulule/limiter/v3/drivers/store/memory"
 )
 
-// SSEBroker manages Server-Sent Events subscribers per email address.
-type SSEBroker struct {
-	mu      sync.RWMutex
-	clients map[string]map[chan string]struct{}
-}
-
-var sseBroker = &SSEBroker{
-	clients: make(map[string]map[chan string]struct{}),
-}
-
-func (b *SSEBroker) Notify(email string, event string, data string) {
-	b.mu.RLock()
-	defer b.mu.RUnlock()
-	if chans, ok := b.clients[email]; ok {
-		for ch := range chans {
-			select {
-			case ch <- fmt.Sprintf("event: %s\ndata: %s\n\n", event, data):
-			default:
-			}
-		}
-	}
-}
-
-func (b *SSEBroker) Subscribe(email string) chan string {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	ch := make(chan string, 10)
-	if _, ok := b.clients[email]; !ok {
-		b.clients[email] = make(map[chan string]struct{})
-	}
-	b.clients[email][ch] = struct{}{}
-	log.Printf("SSE: subscribed %s (clients: %d)", email, len(b.clients[email]))
-	return ch
-}
-
-func (b *SSEBroker) Unsubscribe(email string, ch chan string) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	if chans, ok := b.clients[email]; ok {
-		delete(chans, ch)
-		close(ch)
-		if len(chans) == 0 {
-			delete(b.clients, email)
-		}
-	}
-}
-
-func GetBroker() *SSEBroker { return sseBroker }
+// GetBroker returns the global SSE broker (from events package).
+func GetBroker() *events.Broker { return events.Get() }
 
 func SSEHandler(c *gin.Context) {
 	email := c.Param("email")
@@ -77,13 +31,18 @@ func SSEHandler(c *gin.Context) {
 	c.Writer.Header().Set("Cache-Control", "no-cache")
 	c.Writer.Header().Set("Connection", "keep-alive")
 	c.Writer.Header().Set("X-Accel-Buffering", "no")
-	ch := sseBroker.Subscribe(email)
-	defer sseBroker.Unsubscribe(email, ch)
+
+	broker := events.Get()
+	ch := broker.Subscribe(email)
+	defer broker.Unsubscribe(email, ch)
+
 	c.Writer.WriteString("event: connected\ndata: {}\n\n")
 	c.Writer.Flush()
+
 	notify := c.Writer.CloseNotify()
 	ticker := time.NewTicker(15 * time.Second)
 	defer ticker.Stop()
+
 	for {
 		select {
 		case <-notify:
@@ -124,7 +83,6 @@ func ginLimiterMiddleware(lmt *limiter.Limiter) gin.HandlerFunc {
 }
 
 // sseAuthMiddleware validates JWT from query param for SSE connections.
-// EventSource API cannot send custom headers, so token goes in ?token= query.
 func sseAuthMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		tokenStr := c.Query("token")
@@ -135,7 +93,6 @@ func sseAuthMiddleware() gin.HandlerFunc {
 		}
 		secret := os.Getenv("JWT_SECRET")
 		if secret == "" {
-			// SECURITY: No fallback. Fail closed if not configured.
 			log.Fatal("JWT_SECRET is not set — refusing to serve SSE")
 		}
 		claims := &middleware.JWTClaims{}
@@ -155,7 +112,6 @@ func sseAuthMiddleware() gin.HandlerFunc {
 }
 
 // getCORSOrigins reads allowed origins from env var CORS_ORIGINS (comma-separated).
-// Falls back to same-origin only (empty = no cross-origin allowed).
 func getCORSOrigins() []string {
 	origins := os.Getenv("CORS_ORIGINS")
 	if origins == "" {
@@ -190,7 +146,7 @@ func SetupRouter() *gin.Engine {
 		r.Use(cors.New(cors.Config{
 			AllowOrigins:     corsOrigins,
 			AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
-			AllowHeaders:     []string{"Origin", "Content-Type", "Accept", "Authorization"},
+			AllowHeaders:     []string{"Origin", "Content-Type", "Accept", "Authorization", "X-Email-API-Key"},
 			AllowCredentials: false,
 			MaxAge:           12 * time.Hour,
 		}))
@@ -226,6 +182,10 @@ func SetupRouter() *gin.Engine {
 
 	// First-time admin seed (only works if no admin exists)
 	r.POST("/api/setup", handlers.SeedAdmin)
+
+	// Email receive via HTTP (Cloudflare Worker endpoint)
+	// Auth: X-Email-API-Key header (no JWT needed — service-to-service)
+	r.POST("/api/email/receive", handlers.ReceiveEmailViaHTTP)
 
 	// Static frontend (embedded HTML/JS/CSS)
 	r.StaticFS("/app", web.StaticFS())

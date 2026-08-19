@@ -1,0 +1,13 @@
+{
+  "name": "tempmail-email-worker",
+  "version": "1.0.0",
+  "description": "Cloudflare Email Worker for TempMail — receives emails and forwards to VPS via HTTP",
+  "main": "src/index.js",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy"
+  },
+  "devDependencies": {
+    "wrangler": "^3.0.0"
+  }
+}

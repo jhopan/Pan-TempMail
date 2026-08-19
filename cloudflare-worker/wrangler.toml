@@ -1,0 +1,12 @@
+name = "tempmail-email-worker"
+main = "src/index.js"
+compatibility_date = "2024-01-01"
+
+# Environment variables — set via:
+#   npx wrangler secret put TEMPMAIL_SERVER_URL
+#   npx wrangler secret put TEMPMAIL_API_KEY
+# Or via Cloudflare Dashboard → Workers → Settings → Variables
+[vars]
+TEMPMAIL_SERVER_URL = "https://your-vps.com"
+TEMPMAIL_API_KEY = ""
+FORWARD_LIST = ""

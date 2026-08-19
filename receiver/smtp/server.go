@@ -13,8 +13,8 @@ import (
 	"strings"
 	"time"
 
-	"receiver/api"
 	"receiver/database"
+	"receiver/events"
 	"receiver/parser"
 	"receiver/repository"
 
@@ -134,7 +134,7 @@ func (s *Session) Data(r io.Reader) error {
 	}
 
 	// Notify SSE clients about new email
-	broker := api.GetBroker()
+	broker := events.Get()
 	notification, _ := json.Marshal(map[string]interface{}{
 		"id":      messageID,
 		"sender":  s.From,
