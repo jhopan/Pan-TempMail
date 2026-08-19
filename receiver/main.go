@@ -1,35 +1,76 @@
 package main
 
 import (
+	"context"
 	"log"
+	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
 
 	"receiver/api"
 	"receiver/cleanup"
 	"receiver/database"
-	"receiver/lmtp"
+	"receiver/smtp"
 
 	"github.com/joho/godotenv"
 )
 
 func main() {
+	// Load .env if present (optional — env vars can be set directly)
+	_ = godotenv.Load()
 
-	err := godotenv.Load()
-	if err != nil {
-		log.Fatal(err)
+	// Connect to database (SQLite by default, PostgreSQL if DB_DRIVER=postgres)
+	if err := database.Connect(); err != nil {
+		log.Fatalf("database: %v", err)
 	}
+	defer database.Close()
 
-	err = database.Connect()
-	if err != nil {
-		log.Fatal(err)
-	}
+	// Start cleanup worker for expired inboxes and old messages
+	cleanup.StartCleanupWorker(database.Conn())
 
-	// Start cleanup worker for expired inboxes
-	cleanup.StartCleanupWorker(database.Conn)
+	// Start built-in SMTP server (replaces Maddy)
+	smtp.Start()
 
-	go lmtp.Start()
-
+	// Setup HTTP API + static frontend
 	r := api.SetupRouter()
 
-	r.Run(":8080")
+	// Get HTTP port from env (default 8080)
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8080"
+	}
 
+	// Graceful shutdown
+	srv := &http.Server{
+		Addr:         ":" + port,
+		Handler:      r,
+		ReadTimeout:  10 * time.Second,
+		WriteTimeout: 0, // SSE needs no write timeout
+		IdleTimeout:  120 * time.Second,
+	}
+
+	// Start server in goroutine
+	go func() {
+		log.Printf("HTTP server listening on :%s", port)
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("http: %v", err)
+		}
+	}()
+
+	// Wait for interrupt signal (SIGINT or SIGTERM)
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	<-quit
+	log.Println("Shutting down server...")
+
+	// Give 10 seconds for graceful shutdown
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := srv.Shutdown(ctx); err != nil {
+		log.Printf("http: forced shutdown: %v", err)
+	}
+
+	log.Println("Server exited")
 }

@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"log"
 	"net/http"
 	"os"
 	"strings"
@@ -19,7 +20,8 @@ type JWTClaims struct {
 func getJWTSecret() []byte {
 	secret := os.Getenv("JWT_SECRET")
 	if secret == "" {
-		secret = "tempmail-secret-key-change-me"
+		// SECURITY: No fallback default. Fail closed.
+		log.Fatal("JWT_SECRET is not set — refusing to authenticate")
 	}
 	return []byte(secret)
 }
@@ -27,6 +29,7 @@ func getJWTSecret() []byte {
 func AuthMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var tokenString string
+
 		authHeader := c.GetHeader("Authorization")
 		if authHeader != "" {
 			parts := strings.SplitN(authHeader, " ", 2)
@@ -43,8 +46,8 @@ func AuthMiddleware() gin.HandlerFunc {
 			c.Abort()
 			return
 		}
-		claims := &JWTClaims{}
 
+		claims := &JWTClaims{}
 		token, err := jwt.ParseWithClaims(tokenString, claims, func(token *jwt.Token) (interface{}, error) {
 			return getJWTSecret(), nil
 		})

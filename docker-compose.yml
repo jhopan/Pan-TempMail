@@ -1,0 +1,69 @@
+# ==========================================
+# TempMail Ultra-Light — Docker Compose
+# Single container, ~35MB RAM usage
+# ==========================================
+
+services:
+  tempmail:
+    build: .
+    container_name: tempmail
+    restart: unless-stopped
+    environment:
+      # --- Database (SQLite embedded, zero-config) ---
+      DB_DRIVER: sqlite
+      DB_PATH: /app/data/tempmail.db
+
+      # --- JWT Auth (REQUIRED — generate with: openssl rand -hex 32) ---
+      JWT_SECRET: ${JWT_SECRET:-CHANGE_ME_TO_RANDOM_64_HEX_CHARS}
+      JWT_EXPIRY_HOURS: 24
+
+      # --- Server ---
+      PORT: 8080
+      SMTP_HOST: 0.0.0.0
+      SMTP_PORT: 25
+
+      # --- Domains (comma-separated) ---
+      DOMAINS: ${DOMAINS:-example.com}
+      SITE_NAME: ${SITE_NAME:-TempMail}
+
+      # --- CORS (comma-separated, empty = same-origin only) ---
+      CORS_ORIGINS: ${CORS_ORIGINS:-}
+
+      # --- Cleanup ---
+      CLEANUP_INTERVAL: 1h
+      MESSAGE_RETENTION: 24h
+
+      # --- Attachments ---
+      ATTACHMENTS_DIR: /app/data/attachments
+
+      # --- Webhook (optional) ---
+      WEBHOOK_URL: ${WEBHOOK_URL:-}
+
+      # --- Rate Limiting ---
+      RATE_LIMIT_API: 60
+      RATE_LIMIT_DELETE: 20
+
+      # --- Gin mode ---
+      GIN_MODE: release
+
+      # --- Admin seed (first boot only) ---
+      # Uncomment to seed admin on first start
+      # ADMIN_EMAIL: admin@example.com
+      # ADMIN_PASSWORD: changeme123
+
+    ports:
+      - "25:25"     # SMTP (email reception)
+      - "8080:8080" # HTTP API + Web UI
+
+    volumes:
+      - tempmail_data:/app/data
+
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+
+volumes:
+  tempmail_data:

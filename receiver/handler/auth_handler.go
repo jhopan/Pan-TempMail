@@ -6,13 +6,13 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/gin-gonic/gin"
-	"github.com/golang-jwt/jwt/v5"
-	"golang.org/x/crypto/bcrypt"
-
 	"receiver/middleware"
 	"receiver/models"
 	"receiver/repository"
+
+	"github.com/gin-gonic/gin"
+	"github.com/golang-jwt/jwt/v5"
+	"golang.org/x/crypto/bcrypt"
 )
 
 type AuthHandler struct {
@@ -44,10 +44,7 @@ func (h *AuthHandler) Login(c *gin.Context) {
 	}
 
 	secret := os.Getenv("JWT_SECRET")
-	if secret == "" {
-		secret = "tempmail-secret-key-change-me"
-	}
-
+	// No fallback — middleware.AuthMiddleware will also refuse if empty
 	claims := &middleware.JWTClaims{
 		UserID: user.ID,
 		Email:  user.Email,

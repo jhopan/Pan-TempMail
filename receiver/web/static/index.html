@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>⚡ TempMail — Disposable Email</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: { extend: { colors: { brand: { 400: '#a78bfa', 500: '#8b5cf6', 600: '#7c3aed', 700: '#6d28d9' } } } }
+    }
+  </script>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: #374151; border-radius: 3px; }
+  </style>
+</head>
+<body class="bg-gray-950 text-gray-100 h-screen flex flex-col">
+  <!-- Top Nav -->
+  <div class="flex items-center justify-between px-5 py-2 border-b border-gray-800 bg-gray-900/50">
+    <div class="flex items-center gap-2">
+      <span class="text-brand-400 font-bold text-xl">⚡</span>
+      <span class="text-sm text-gray-400">Logged in as <span class="text-white" id="userEmail"></span></span>
+    </div>
+    <button onclick="API.logout()" class="bg-red-600/20 hover:bg-red-600/40 text-red-400 px-3 py-1 rounded text-sm transition-colors">Logout</button>
+  </div>
+
+  <div class="flex flex-1 overflow-hidden">
+    <!-- Left Panel -->
+    <div class="w-80 min-w-80 border-r border-gray-800 flex flex-col">
+      <div class="p-5 border-b border-gray-800">
+        <h1 class="text-2xl font-bold tracking-tight"><span class="text-brand-400">⚡</span> Temp Mail</h1>
+        <div class="flex items-center gap-2 mt-1">
+          <p class="text-gray-500 text-sm">Disposable email</p>
+          <span id="sseDot" class="inline-block w-2 h-2 rounded-full bg-gray-600"></span>
+          <span id="sseText" class="text-gray-600 text-xs">Connecting...</span>
+        </div>
+      </div>
+
+      <div class="p-4 border-b border-gray-800 space-y-3">
+        <input id="username" type="text" placeholder="Enter username" class="cooldown-btn rounded-lg px-3 py-2 w-full text-sm bg-gray-900 border border-gray-700 focus:border-brand-500 focus:outline-none" />
+        <select id="domain" class="cooldown-btn rounded-lg px-3 py-2 w-full text-sm bg-gray-900 border border-gray-700 focus:border-brand-500 focus:outline-none">
+          <!-- domains populated by JS -->
+        </select>
+        <div class="flex gap-2">
+          <button id="changeBtn" onclick="changeEmail()" class="cooldown-btn flex-1 rounded-lg px-3 py-2 text-sm font-medium bg-brand-600 hover:bg-brand-700 text-white transition-colors">Change</button>
+          <button id="randomBtn" onclick="randomEmail()" class="cooldown-btn flex-1 rounded-lg px-3 py-2 text-sm font-medium bg-gray-700 hover:bg-gray-600 text-white transition-colors">🎲 Random</button>
+        </div>
+        <div class="bg-gray-900 rounded-lg p-3">
+          <div class="text-gray-500 text-xs mb-1">Your Email</div>
+          <div id="currentEmail" class="font-mono text-sm text-green-400 break-all cursor-pointer hover:text-green-300 transition-colors" onclick="copyEmail()">loading...</div>
+          <button id="copyBtn" onclick="copyEmail()" class="mt-2 text-xs text-gray-500 hover:text-gray-300">📋 Copy</button>
+        </div>
+        <div id="inboxActions"></div>
+      </div>
+
+      <div id="messageList" class="flex-1 overflow-y-auto"></div>
+
+      <div class="p-3 border-t border-gray-800 text-center text-xs text-gray-600">
+        <span id="msgCount">0</span> messages
+      </div>
+    </div>
+
+    <!-- Right Panel -->
+    <div id="messageView" class="flex-1 flex flex-col overflow-hidden"></div>
+  </div>
+
+  <script src="/app/app.js"></script>
+  <script>
+    // Display user email
+    const user = JSON.parse(localStorage.getItem('auth_user') || '{}');
+    document.getElementById('userEmail').textContent = user.email || 'unknown';
+
+    // Populate domains from /api/config or use default
+    async function loadDomains() {
+      try {
+        const res = await fetch('/api/config');
+        if (res.ok) {
+          const cfg = await res.json();
+          window.TEMPMAIL_DOMAINS = cfg.domains || ['example.com'];
+        } else {
+          window.TEMPMAIL_DOMAINS = ['example.com'];
+        }
+      } catch {
+        window.TEMPMAIL_DOMAINS = ['example.com'];
+      }
+      const sel = document.getElementById('domain');
+      const saved = localStorage.getItem('email_domain') || (window.TEMPMAIL_DOMAINS[0] || 'example.com');
+      sel.innerHTML = window.TEMPMAIL_DOMAINS.map(d => `<option value="${d}" ${d === saved ? 'selected' : ''}>@${d}</option>`).join('');
+      init();
+    }
+    loadDomains();
+  </script>
+</body>
+</html>

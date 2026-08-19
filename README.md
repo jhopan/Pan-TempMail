@@ -1,14 +1,11 @@
-# 📧 TempMailByJhopanStore
+# 📧 TempMail Ultra-Light
 
 <div align="center">
 
-**Self-hosted Temporary Email Platform with Authentication & Multi-Domain Support**
+**Single-binary disposable email platform — ~24MB binary, ~35MB RAM**
 
 [![Go](https://img.shields.io/badge/Go-1.25+-00ADD8?style=flat&logo=go)](https://golang.org/)
-[![Next.js](https://img.shields.io/badge/Next.js-16-black?style=flat&logo=next.js)](https://nextjs.org/)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
-
-[Features](#-features) • [Installation](#-quick-start) • [Documentation](#-documentation) • [Contributing](#-contributing)
 
 </div>
 
@@ -16,283 +13,154 @@
 
 ## 🌟 Overview
 
-TempMailByJhopanStore is a production-ready temporary email platform designed for self-hosting. It provides secure, disposable email addresses with real-time inbox updates, user authentication, and multi-domain support.
+TempMail Ultra-Light is a production-ready temporary email platform in a **single Go binary**. No Node.js, no PostgreSQL, no Maddy, no Nginx — just one file.
 
 **Key Highlights:**
-- 🔐 **JWT Authentication** with role-based access control (admin/user)
-- ⚡ **Real-time Updates** via Server-Sent Events (SSE)
-- 🌍 **Multi-Domain Support** with automatic Cloudflare DNS configuration
-- 🎨 **Modern UI** built with Next.js 16 and Tailwind CSS
-- 🔒 **Secure Email Rendering** using sandboxed iframes
-- 📱 **Responsive Design** works on desktop and mobile
-
----
-
-## ✨ Features
-
-### For Users
-- ✅ Instant email generation with custom domains
-- ✅ Real-time inbox updates (no refresh needed)
-- ✅ View HTML emails in secure sandbox
-- ✅ Download attachments
-- ✅ 60-second cooldown protection
-- ✅ Copy email address with one click
-
-### For Admins
-- ✅ Complete user management (CRUD operations)
-- ✅ Role-based access control (admin/user)
-- ✅ Password reset functionality
-- ✅ Multi-domain configuration
-- ✅ Database backup tools
-- ✅ Service monitoring dashboard
-
-### For Developers
-- ✅ RESTful API with JWT authentication
-- ✅ Rate limiting (60 req/min API, 20 req/min DELETE)
-- ✅ UTF-8 fallback for non-standard email encodings
-- ✅ Automatic cleanup of old emails (24 hours)
-- ✅ Comprehensive logging
-- ✅ Easy deployment scripts
+- 📦 **Single binary** (~24MB) — everything embedded
+- 💾 **SQLite embedded** — zero database config
+- 📨 **Built-in SMTP** — no external mail server
+- 🎨 **Embedded frontend** — no Node.js runtime
+- ⚡ **~35MB RAM** — runs on the cheapest VPS
+- 🤖 **Automation API** — create inboxes, wait for emails, extract OTPs
+- 🔒 **Secure by default** — no hardcoded secrets, fail-closed auth
 
 ---
 
 ## 🚀 Quick Start
 
-### Prerequisites
-
-- Ubuntu 22.04/24.04 LTS (fresh install recommended)
-- Root/sudo access
-- Domain name (with Cloudflare DNS recommended)
-- Minimum: 1GB RAM, 1 CPU, 10GB disk
-
-### Installation
-
-**1. Clone the repository**
+### Option 1: Docker (Recommended)
 
 ```bash
-cd /opt
-sudo git clone https://github.com/jhopan/TempMailByJhopanstore.git
+# 1. Generate JWT secret
+echo "JWT_SECRET=$(openssl rand -hex 32)" > .env
+echo "DOMAINS=mail.example.com" >> .env
+
+# 2. Build and run
+docker compose up -d --build
+
+# 3. Check health
+curl http://localhost:8080/health
+```
+
+### Option 2: Binary directly
+
+```bash
+# 1. Build
+cd receiver
+go build -ldflags="-s -w" -o tempmail .
+
+# 2. Configure
+cp ../.env.example .env
+# Edit .env — set JWT_SECRET and DOMAINS
+
+# 3. Run
+./tempmail
+```
+
+### Option 3: From source
+
+```bash
+git clone https://github.com/jhopan/TempMailByJhopanstore.git
 cd TempMailByJhopanstore
-sudo chown -R $USER:$USER .
+cp .env.example .env
+# Edit .env — set JWT_SECRET and DOMAINS
+cd receiver && go run .
 ```
-
-**2. Run setup script**
-
-```bash
-sudo bash scripts/setup.sh
-```
-
-The setup will:
-- ✅ Install all dependencies (Go, Node.js, PostgreSQL, Maddy, Nginx)
-- ✅ Configure database and create admin account
-- ✅ Setup mail server (Maddy)
-- ✅ Configure reverse proxy (Nginx)
-- ✅ Create systemd services
-- ✅ Configure firewall (UFW)
-
-**You'll be prompted for:**
-- Database password
-- Server IP address
-- Primary domain (e.g., `mail.example.com`)
-- Cloudflare API credentials (optional)
-
-**3. Build and start services**
-
-```bash
-sudo bash scripts/start.sh
-# Select: 1) Build & Start (full)
-```
-
-**4. Access the application**
-
-Open your browser: `http://your-server-ip`
-
-**Default Admin Credentials:**
-```
-Email:    jhopanstore@gmail.com
-Password: Jh0pan@St0re
-```
-
-⚠️ **Important:** Change the default password immediately after first login!
 
 ---
 
-## 📖 Documentation
+## 📊 Resource Usage
 
-### Management Menu
-
-For day-to-day operations, use the interactive menu:
-
-```bash
-sudo bash scripts/menu.sh
-```
-
-**Available Options:**
-
-**Services Management**
-1. Build & Start All
-2. Restart All Services
-3. Stop All Services
-4. View Logs
-
-**User Management**
-5. List Users
-6. Add User
-7. Delete User
-8. Reset Password
-
-**Domain Management**
-9. Add Domain (with Cloudflare DNS auto-setup)
-
-**Database**
-10. Backup Database
-
-### Adding New Domains
-
-**Via Menu (Recommended):**
-```bash
-sudo bash scripts/menu.sh
-# Select: 9) Add Domain
-```
-
-**Direct Command:**
-```bash
-sudo bash scripts/add-domain.sh newdomain.com
-```
-
-The script automatically:
-- Creates Cloudflare zone (if needed)
-- Sets up MX, A, SPF, and DMARC records
-- Updates Maddy configuration
-- Updates frontend domain list
-- Restarts services
-
-**Requirements:**
-- Cloudflare API Token (with Zone:Edit permission)
-- Cloudflare Account ID
+| Component | Old Version | Ultra-Light |
+|-----------|-------------|-------------|
+| Binary size | N/A (multi-process) | **24MB** |
+| RAM (idle) | ~400-500MB | **~35MB** |
+| RAM (active) | ~600MB+ | **~50MB** |
+| Processes | 4 (Maddy, Go, Next.js, Nginx) | **1** |
+| External deps | PostgreSQL, Node.js, Maddy, Nginx | **None** |
+| Docker image | N/A | **~25MB** (Alpine) |
 
 ---
 
 ## 🏗️ Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                         Browser                              │
-└───────────────────────────┬─────────────────────────────────┘
-                            │
-                            ▼
-┌─────────────────────────────────────────────────────────────┐
-│                    Nginx (Port 80/443)                       │
-│              Reverse Proxy + SSL Termination                 │
-└───────────────────────────┬─────────────────────────────────┘
-                            │
-            ┌───────────────┴───────────────┐
-            │                               │
-            ▼                               ▼
-┌───────────────────────┐      ┌─────────────────────────┐
-│  Next.js Frontend     │      │   Go Backend (Gin)      │
-│  Port 3000            │      │   Port 8080             │
-│                       │      │                         │
-│  • Login Page         │      │  • REST API             │
-│  • Inbox UI           │      │  • JWT Auth             │
-│  • Admin Dashboard    │      │  • Rate Limiting        │
-│  • API Routes         │      │  • SSE Endpoint         │
-└───────────────────────┘      └────────────┬────────────┘
-                                            │
-                                ┌───────────┴───────────┐
-                                │                       │
-                                ▼                       ▼
-                     ┌──────────────────┐    ┌─────────────────┐
-                     │  Maddy SMTP      │    │  PostgreSQL     │
-                     │  Port 25         │    │  Database       │
-                     │                  │    │                 │
-                     │  Receives emails │    │  • inboxes      │
-                     │  Forwards to     │    │  • messages     │
-                     │  Go backend      │    │  • attachments  │
-                     │  via LMTP:8024   │    │  • users        │
-                     └──────────────────┘    └─────────────────┘
+┌──────────────────────────────────────────┐
+│         Single Go Binary (~24MB)          │
+│                                          │
+│  ┌──────────┐  ┌────────┐  ┌─────────┐ │
+│  │ SMTP     │  │ HTTP   │  │ Static  │ │
+│  │ Port 25  │  │ API    │  │ Frontend│ │
+│  │          │  │ Port   │  │ (embed) │ │
+│  │ built-in │  │ 8080   │  │         │ │
+│  └────┬─────┘  └───┬────┘  └────┬────┘ │
+│       │            │            │       │
+│       ▼            ▼            ▼       │
+│  ┌────────────────────────────────────┐ │
+│  │     SQLite (embedded file)         │ │
+│  │     data/tempmail.db               │ │
+│  └────────────────────────────────────┘ │
+└──────────────────────────────────────────┘
 ```
 
 ---
 
-## 🛠️ Tech Stack
+## 🤖 Automation API
 
-| Component | Technology | Version |
-|-----------|-----------|---------|
-| **Backend** | Go (Gin Framework) | 1.25+ |
-| **Frontend** | Next.js (App Router) | 16.x |
-| **UI** | Tailwind CSS | 4.x |
-| **Mail Server** | Maddy | 0.7+ |
-| **Database** | PostgreSQL | 14+ |
-| **Web Server** | Nginx | 1.24+ |
-| **Authentication** | JWT (golang-jwt) | 5.x |
-| **Password Hash** | bcrypt | Latest |
-| **Rate Limiting** | ulule/limiter | 3.x |
-| **DNS Management** | Cloudflare API | v4 |
+### Create an inbox
 
----
-
-## 📁 Project Structure
-
+```bash
+curl -X POST https://your-instance/api/inbox \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"username": "test123", "domain": "mail.example.com"}'
 ```
-TempMailByJhopanStore/
-├── receiver/              # Go Backend
-│   ├── main.go           # Entry point
-│   ├── api/              # HTTP routes & middleware
-│   ├── handler/          # Auth handlers
-│   ├── handlers/         # API handlers
-│   ├── middleware/       # JWT & admin middleware
-│   ├── models/           # Data models
-│   ├── repository/       # Database operations
-│   ├── database/         # DB connection
-│   ├── parser/           # Email parsing
-│   └── lmtp/             # LMTP server
-│
-├── frontend/             # Next.js Frontend
-│   ├── src/app/          # Pages
-│   │   ├── page.tsx      # Main inbox
-│   │   ├── login/        # Login page
-│   │   ├── admin/        # Admin dashboard
-│   │   └── api/          # API proxy routes
-│   └── src/context/      # Auth context
-│
-├── scripts/              # Management Scripts
-│   ├── setup.sh          # Fresh installation
-│   ├── start.sh          # Build & start
-│   ├── menu.sh           # Interactive menu
-│   └── add-domain.sh     # Domain management
-│
-├── config/               # Configuration Files
-│   ├── nginx/            # Nginx config
-│   ├── maddy/            # Maddy config
-│   └── systemd/          # Systemd services
-│
-├── docs/                 # Documentation
-│   ├── plan.md           # Full documentation
-│   └── DEPLOYMENT.md     # Deployment guide
-│
-├── README.md             # This file
-└── .env.example          # Environment template
+
+### Wait for an email (blocking — no polling!)
+
+```bash
+# Blocks until email arrives, up to 60 seconds
+curl "https://your-instance/api/inbox/test123@mail.example.com/wait?timeout=60" \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+Response includes **auto-extracted OTP codes** and **verification links**:
+
+```json
+{
+  "id": 42,
+  "from": "noreply@example.com",
+  "subject": "Your verification code",
+  "codes": ["483920"],
+  "links": ["https://example.com/verify?token=abc123"]
+}
+```
+
+### Full automation example
+
+```bash
+# 1. Login
+TOKEN=$(curl -s -X POST https://your-instance/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"email":"admin@example.com","password":"yourpass"}' | jq -r .token)
+
+# 2. Create inbox
+ADDR=$(curl -s -X POST https://your-instance/api/inbox \
+  -H "Authorization: Bearer $TOKEN" \
+  -d '{}' | jq -r .email)
+
+# 3. ... trigger signup that sends email to $ADDR ...
+
+# 4. Wait for email and extract OTP
+OTP=$(curl -s "https://your-instance/api/inbox/$ADDR/wait?timeout=60" \
+  -H "Authorization: Bearer $TOKEN" | jq -r .codes[0])
+
+echo "OTP: $OTP"
 ```
 
 ---
 
-## 🔐 Security Features
-
-- ✅ **JWT Authentication** with 24-hour token expiry
-- ✅ **Bcrypt Password Hashing** (cost factor 12)
-- ✅ **Rate Limiting** to prevent abuse
-- ✅ **Role-Based Access Control** (admin/user)
-- ✅ **No Public Registration** (admin creates accounts)
-- ✅ **Sandboxed Email Rendering** (iframe isolation)
-- ✅ **DOMPurify XSS Protection**
-- ✅ **UTF-8 Encoding Validation**
-- ✅ **SQL Injection Prevention** (parameterized queries)
-- ✅ **Firewall Configuration** (UFW)
-
----
-
-## 📊 API Endpoints
+## 📖 API Endpoints
 
 ### Authentication
 ```
@@ -300,242 +168,172 @@ POST   /api/auth/login              # Login (returns JWT)
 GET    /api/auth/me                 # Current user info
 ```
 
-### Admin (Admin only)
+### Inbox
 ```
-GET    /api/admin/users             # List all users
+POST   /api/inbox                   # Create inbox (automation)
+GET    /api/inbox/:email            # Get messages (paginated)
+DELETE /api/inbox/:email            # Delete inbox + messages
+GET    /api/inbox/:email/wait       # Wait for message (blocking)
+```
+
+### Messages
+```
+GET    /api/message/:id             # Get message detail + extracted codes/links
+DELETE /api/message/:id             # Delete message
+GET    /api/message/:id/attachments # List attachments
+GET    /api/attachment/:id          # Download attachment
+```
+
+### Real-time
+```
+GET    /sse/:email?token=JWT        # Server-Sent Events stream
+```
+
+### Admin
+```
+GET    /api/admin/users             # List users
 POST   /api/admin/users             # Create user
 PUT    /api/admin/users/:id         # Update user
 DELETE /api/admin/users/:id         # Delete user
 PUT    /api/admin/users/:id/password # Reset password
 ```
 
-### Inbox
+### Public
 ```
-GET    /inbox/:email                # Get inbox messages
-DELETE /inbox/:email                # Delete all messages
-```
-
-### Messages
-```
-GET    /message/:id                 # Get message detail
-DELETE /message/:id                 # Delete message
-GET    /message/:id/attachments     # Get attachments
-```
-
-### Real-time
-```
-GET    /sse/:email                  # Server-Sent Events stream
+GET    /health                      # Health check
+GET    /api/config                  # Public config (domains, site name)
 ```
 
 ---
 
 ## 🔧 Configuration
 
-### Environment Variables
+All config via environment variables (`.env` file supported):
 
-The setup script automatically creates `receiver/.env` with your configuration:
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `DB_DRIVER` | `sqlite` | `sqlite` or `postgres` |
+| `DB_PATH` | `data/tempmail.db` | SQLite file path |
+| `JWT_SECRET` | **required** | Generate with `openssl rand -hex 32` |
+| `DOMAINS` | `example.com` | Comma-separated mail domains |
+| `SMTP_PORT` | `25` | SMTP listen port |
+| `PORT` | `8080` | HTTP API port |
+| `CORS_ORIGINS` | empty | Comma-separated allowed origins |
+| `CLEANUP_INTERVAL` | `1h` | How often to purge old data |
+| `MESSAGE_RETENTION` | `24h` | How long to keep messages |
+| `WEBHOOK_URL` | empty | URL to POST to on email receipt |
+| `ATTACHMENTS_DIR` | `data/attachments` | Attachment storage path |
 
-```env
-# Database
-DB_HOST=localhost
-DB_PORT=5432
-DB_USER=tempmail
-DB_PASSWORD=***
-# JWT
-JWT_SECRET=your-s...n
-# Server
-PORT=8080
+---
+
+## 🚀 Deployment
+
+### VPS (minimum 512MB RAM)
+
+```bash
+# Build on server
+git clone https://github.com/jhopan/TempMailByJhopanstore.git
+cd TempMailByJhopanstore
+docker compose up -d --build
 ```
 
-### Nginx Configuration
+### Oracle Cloud Free Tier
 
-Located at: `/etc/nginx/sites-available/tempmail`
+```bash
+# ARM instance (4 core, 24GB RAM) — way more than enough
+docker compose up -d --build
+```
 
-Key features:
-- Reverse proxy to Next.js (port 3000)
-- SSE endpoint proxy (port 8080)
-- WebSocket support
-- Gzip compression
+### Requirements
 
-### Maddy Configuration
+- **Port 25** must be unblocked (for SMTP reception)
+- **Domain** with MX record pointing to your server
+- **Minimum**: 512MB RAM, 1 CPU, 10GB disk
 
-Located at: `/etc/maddy/maddy.conf`
+---
 
-Key features:
-- SMTP server (port 25)
-- LMTP forwarding to Go backend (port 8024)
-- Multi-domain support
-- Relaxed spam checks (appropriate for temp mail)
+## 🔒 Security
+
+- ✅ JWT auth with no fallback secret (fail-closed)
+- ✅ Bcrypt password hashing
+- ✅ Rate limiting (login 5/min, API 60/min, delete 20/min)
+- ✅ Role-based access (admin/user)
+- ✅ Sandboxed email HTML rendering
+- ✅ CORS from environment variable
+- ✅ No hardcoded credentials
+- ✅ Graceful shutdown
+- ✅ SQL injection prevention (parameterized queries)
+
+---
+
+## 🛠️ Tech Stack
+
+| Component | Technology |
+|-----------|-----------|
+| Backend | Go 1.25+ (Gin framework) |
+| Database | SQLite (embedded) or PostgreSQL (optional) |
+| SMTP | Built-in (emersion/go-smtp) |
+| Frontend | Vanilla HTML + JS + Tailwind CSS (CDN) |
+| Auth | JWT (golang-jwt/v5) |
+| Container | Docker (Alpine, multi-stage) |
+
+---
+
+## 📁 Project Structure
+
+```
+TempMailByJhopanStore/
+├── receiver/              # Go Backend (single binary)
+│   ├── main.go           # Entry point + graceful shutdown
+│   ├── api/              # HTTP routes & SSE
+│   ├── handler/          # Auth handlers
+│   ├── handlers/         # API handlers (inbox, message, etc.)
+│   ├── middleware/       # JWT & admin middleware
+│   ├── models/           # Data models
+│   ├── repository/       # Database operations
+│   ├── database/         # DB connection (SQLite/PostgreSQL)
+│   ├── cleanup/          # Auto-purge expired emails
+│   ├── smtp/             # Built-in SMTP server
+│   ├── parser/           # Email parsing
+│   └── web/              # Embedded static frontend
+│       └── static/       # HTML, JS, CSS files
+├── Dockerfile            # Multi-stage build (~25MB image)
+├── docker-compose.yml    # Single-container deployment
+└── .env.example          # Environment template
+```
 
 ---
 
 ## 🐛 Troubleshooting
 
-### Email Not Appearing
+### Email not arriving
 
 ```bash
-# Check Maddy logs
-sudo journalctl -u maddy -f
-
-# Check backend logs
-sudo journalctl -u tempmail-receiver -f
-
-# Check database
-sudo -u postgres psql -d tempmail -c "SELECT * FROM messages ORDER BY id DESC LIMIT 5;"
-```
-
-### Frontend Errors
-
-```bash
-# Rebuild frontend
-cd /opt/TempMailByJhopanStore/frontend
-npm run build
-sudo systemctl restart tempmail-frontend
+# Check if SMTP is listening
+netstat -tlnp | grep :25
 
 # Check logs
-sudo journalctl -u tempmail-frontend -n 50
+docker compose logs -f tempmail
 ```
 
-### Login Issues
+### Can't login
 
 ```bash
-# Check if user exists
-sudo -u postgres psql -d tempmail -c "SELECT id, email, role FROM users;"
+# Check if JWT_SECRET is set
+grep JWT_SECRET .env
 
-# Reset admin password via menu
-sudo bash scripts/menu.sh
-# Select: 8) Reset Password
+# Generate one if missing
+echo "JWT_SECRET=$(openssl rand -hex 32)" >> .env
 ```
 
-### Port Conflicts
+### Port 25 blocked
 
+Many VPS providers block port 25. Check:
 ```bash
-# Check what's using the port
-sudo netstat -tlnp | grep :80
-sudo netstat -tlnp | grep :25
-
-# Kill process if needed
-sudo kill -9 <PID>
+timeout 5 bash -c 'cat < /dev/null > /dev/tcp/gmail-smtp-in.l.google.com/25' \
+  && echo "port 25 open" || echo "port 25 blocked"
 ```
 
 ---
-
-## 🔄 Updating
-
-```bash
-cd /opt/TempMailByJhopanStore
-git pull
-sudo bash scripts/start.sh
-# Select: 1) Build & Start (full)
-```
-
----
-
-## 📦 Backup & Restore
-
-### Backup Database
-
-```bash
-# Via menu
-sudo bash scripts/menu.sh
-# Select: 10) Backup Database
-
-# Manual backup
-sudo -u postgres pg_dump tempmail > /backup/tempmail-$(date +%Y%m%d).sql
-```
-
-### Restore Database
-
-```bash
-sudo -u postgres psql -d tempmail < /backup/tempmail-20260612.sql
-```
-
----
-
-## 🚀 Deployment Options
-
-### Option 1: Fresh Install (Recommended)
-
-Follow the [Quick Start](#-quick-start) guide above.
-
-### Option 2: Docker Support (Coming Soon)
-
-```bash
-# docker-compose up -d
-```
-
-### Option 3: Manual Installation
-
-See [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) for detailed manual installation steps.
-
----
-
-## 📝 Roadmap
-
-- [x] Core functionality (inbox, messages, SSE)
-- [x] Authentication system
-- [x] Admin dashboard
-- [x] Multi-domain support
-- [x] Cloudflare DNS integration
-- [x] Cooldown protection
-- [ ] Docker support
-- [ ] Email forwarding
-- [ ] Custom domain per user
-- [ ] Email search & filter
-- [ ] Export emails (EML/PDF)
-- [ ] Webhook notifications
-- [ ] Multi-language support
-
----
-
-## 🤝 Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request.
-
-1. Fork the repository
-2. Create your feature branch (`git checkout -b feature/AmazingFeature`)
-3. Commit your changes (`git commit -m 'Add some AmazingFeature'`)
-4. Push to the branch (`git push origin feature/AmazingFeature`)
-5. Open a Pull Request
-
----
-
-## 📄 License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
----
-
-## 👤 Author
-
-**JhopanStore**
-- Email: jhopanstore@gmail.com
-- GitHub: [@jhopan](https://github.com/jhopan)
-
----
-
-## 🙏 Acknowledgments
-
-- [Maddy Mail Server](https://github.com/foxcpp/maddy) - Composable mail server
-- [Next.js](https://nextjs.org/) - The React framework for production
-- [Gin](https://gin-gonic.com/) - High-performance HTTP web framework
-- [Tailwind CSS](https://tailwindcss.com/) - Utility-first CSS framework
-- [Cloudflare](https://cloudflare.com/) - DNS and CDN services
-
----
-
-## 📞 Support
-
-For support and questions:
-- 📧 Email: jhopanstore@gmail.com
-- 🐛 Issues: [GitHub Issues](https://github.com/jhopan/TempMailByJhopanstore/issues)
-
----
-
-<div align="center">
 
 **Made with ❤️ by JhopanStore**
-
-⭐ Star this repo if you find it useful!
-
-</div>

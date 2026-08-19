@@ -6,12 +6,14 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
 	"receiver/handler"
 	"receiver/handlers"
 	"receiver/middleware"
+	"receiver/web"
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
@@ -20,6 +22,7 @@ import (
 	"github.com/ulule/limiter/v3/drivers/store/memory"
 )
 
+// SSEBroker manages Server-Sent Events subscribers per email address.
 type SSEBroker struct {
 	mu      sync.RWMutex
 	clients map[string]map[chan string]struct{}
@@ -120,8 +123,8 @@ func ginLimiterMiddleware(lmt *limiter.Limiter) gin.HandlerFunc {
 	}
 }
 
-
-// sseAuthMiddleware validates JWT from query param for SSE connections
+// sseAuthMiddleware validates JWT from query param for SSE connections.
+// EventSource API cannot send custom headers, so token goes in ?token= query.
 func sseAuthMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		tokenStr := c.Query("token")
@@ -132,7 +135,8 @@ func sseAuthMiddleware() gin.HandlerFunc {
 		}
 		secret := os.Getenv("JWT_SECRET")
 		if secret == "" {
-			secret = "tempmail-secret-key-change-me"
+			// SECURITY: No fallback. Fail closed if not configured.
+			log.Fatal("JWT_SECRET is not set — refusing to serve SSE")
 		}
 		claims := &middleware.JWTClaims{}
 		token, err := jwt.ParseWithClaims(tokenStr, claims, func(t *jwt.Token) (interface{}, error) {
@@ -150,28 +154,60 @@ func sseAuthMiddleware() gin.HandlerFunc {
 	}
 }
 
+// getCORSOrigins reads allowed origins from env var CORS_ORIGINS (comma-separated).
+// Falls back to same-origin only (empty = no cross-origin allowed).
+func getCORSOrigins() []string {
+	origins := os.Getenv("CORS_ORIGINS")
+	if origins == "" {
+		return []string{}
+	}
+	var result []string
+	for _, o := range strings.Split(origins, ",") {
+		o = strings.TrimSpace(o)
+		if o != "" {
+			result = append(result, o)
+		}
+	}
+	return result
+}
+
 func SetupRouter() *gin.Engine {
+	// SECURITY: Fail fast if JWT_SECRET not set
+	if os.Getenv("JWT_SECRET") == "" {
+		log.Fatal("JWT_SECRET environment variable is required. Generate one with: openssl rand -hex 32")
+	}
+
+	ginMode := os.Getenv("GIN_MODE")
+	if ginMode == "" {
+		ginMode = "release"
+	}
+	gin.SetMode(ginMode)
 	r := gin.Default()
 
-	r.Use(cors.New(cors.Config{
-		AllowOrigins:     []string{"http://213.35.108.142:3000", "http://213.35.108.142", "http://localhost:3000"},
-		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
-		AllowHeaders:     []string{"Origin", "Content-Type", "Accept", "Authorization"},
-		MaxAge:           12 * time.Hour,
-	}))
+	// CORS from environment variable (no hardcoded IPs)
+	corsOrigins := getCORSOrigins()
+	if len(corsOrigins) > 0 {
+		r.Use(cors.New(cors.Config{
+			AllowOrigins:     corsOrigins,
+			AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
+			AllowHeaders:     []string{"Origin", "Content-Type", "Accept", "Authorization"},
+			AllowCredentials: false,
+			MaxAge:           12 * time.Hour,
+		}))
+	}
 
 	// Rate limiters
-	apiRate, _ := limiter.NewRateFromFormatted("60-M")   // 60 req/min per IP
+	apiRate, _ := limiter.NewRateFromFormatted("60-M")
 	delRate, _ := limiter.NewRateFromFormatted("20-M")
-	loginRate, _ := limiter.NewRateFromFormatted("5-M")  // 5 login attempts/min
-	adminRate, _ := limiter.NewRateFromFormatted("30-M") // 30 admin req/min    // 20 deletes/min per IP
+	loginRate, _ := limiter.NewRateFromFormatted("5-M")
+	adminRate, _ := limiter.NewRateFromFormatted("30-M")
 
 	apiStore := memory.NewStore()
 	delStore := memory.NewStore()
-
 	loginStore := memory.NewStore()
-	loginLimiter := limiter.New(loginStore, loginRate)
 	adminStore := memory.NewStore()
+
+	loginLimiter := limiter.New(loginStore, loginRate)
 	adminLimiter := limiter.New(adminStore, adminRate)
 	apiLimiter := limiter.New(apiStore, apiRate)
 	delLimiter := limiter.New(delStore, delRate)
@@ -182,8 +218,19 @@ func SetupRouter() *gin.Engine {
 	// Auth handler
 	authHandler := handler.NewAuthHandler()
 
-	// Health (no rate limit)
+	// Health check (no rate limit, no auth)
 	r.GET("/health", handlers.Health)
+
+	// Public config endpoint (for frontend to read domains)
+	r.GET("/api/config", web.ConfigHandler)
+
+	// Static frontend (embedded HTML/JS/CSS)
+	r.StaticFS("/app", web.StaticFS())
+
+	// Root redirect to app
+	r.GET("/", func(c *gin.Context) {
+		c.Redirect(http.StatusFound, "/app/")
+	})
 
 	// Auth routes (public)
 	loginMW := ginLimiterMiddleware(loginLimiter)
@@ -212,12 +259,21 @@ func SetupRouter() *gin.Engine {
 	authAPI := r.Group("/")
 	authAPI.Use(middleware.AuthMiddleware())
 	{
-	authAPI.GET("/inbox/:email", apiMW, handlers.GetInbox)
-	authAPI.DELETE("/inbox/:email", delMW, handlers.DeleteInbox)
-	authAPI.GET("/message/:id", apiMW, handlers.GetMessage)
-	authAPI.DELETE("/message/:id", delMW, handlers.DeleteMessage)
-	authAPI.GET("/message/:id/attachments", apiMW, handlers.GetMessageAttachments)
-	authAPI.GET("/attachment/:id", apiMW, handlers.GetAttachment)
+		// Inbox endpoints
+		authAPI.GET("/inbox/:email", apiMW, handlers.GetInbox)
+		authAPI.DELETE("/inbox/:email", delMW, handlers.DeleteInbox)
+
+		// Automation: create inbox programmatically
+		authAPI.POST("/inbox", apiMW, handlers.CreateInboxAPI)
+
+		// Automation: wait for message (blocking, no polling)
+		authAPI.GET("/inbox/:email/wait", apiMW, handlers.WaitForMessage)
+
+		// Message endpoints
+		authAPI.GET("/message/:id", apiMW, handlers.GetMessage)
+		authAPI.DELETE("/message/:id", delMW, handlers.DeleteMessage)
+		authAPI.GET("/message/:id/attachments", apiMW, handlers.GetMessageAttachments)
+		authAPI.GET("/attachment/:id", apiMW, handlers.GetAttachment)
 	}
 
 	// SSE route - auth via query param (EventSource cannot send custom headers)

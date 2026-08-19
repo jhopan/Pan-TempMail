@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Login — TempMail</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-950 text-gray-100">
+  <div class="min-h-screen flex items-center justify-center px-4">
+    <div class="w-full max-w-md">
+      <div class="text-center mb-8">
+        <div class="text-5xl mb-3">⚡</div>
+        <h1 class="text-3xl font-bold">TempMail</h1>
+        <p class="text-gray-500 mt-2">Sign in to access your inbox</p>
+      </div>
+      <form id="loginForm" class="space-y-4">
+        <div>
+          <label class="block text-sm text-gray-400 mb-1">Email</label>
+          <input id="email" type="email" required class="w-full rounded-lg px-3 py-2 bg-gray-900 border border-gray-700 focus:border-brand-500 focus:outline-none text-sm" placeholder="admin@example.com" />
+        </div>
+        <div>
+          <label class="block text-sm text-gray-400 mb-1">Password</label>
+          <input id="password" type="password" required class="w-full rounded-lg px-3 py-2 bg-gray-900 border border-gray-700 focus:border-brand-500 focus:outline-none text-sm" placeholder="••••••••" />
+        </div>
+        <div id="error" class="hidden bg-red-900/20 border border-red-800/50 rounded-lg p-3 text-red-400 text-sm"></div>
+        <button type="submit" class="w-full bg-brand-600 hover:bg-brand-700 text-white rounded-lg px-4 py-2 text-sm font-medium transition-colors">Sign In</button>
+      </form>
+    </div>
+  </div>
+  <script>
+    const token = localStorage.getItem('auth_token');
+    if (token) window.location.href = '/app/';
+
+    document.getElementById('loginForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const email = document.getElementById('email').value;
+      const password = document.getElementById('password').value;
+      const errEl = document.getElementById('error');
+      errEl.classList.add('hidden');
+      try {
+        const res = await fetch('/api/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, password }),
+        });
+        if (!res.ok) {
+          const err = await res.json();
+          throw new Error(err.error || 'Login failed');
+        }
+        const data = await res.json();
+        localStorage.setItem('auth_token', data.token);
+        localStorage.setItem('auth_user', JSON.stringify(data.user));
+        window.location.href = '/app/';
+      } catch (err) {
+        errEl.textContent = err.message;
+        errEl.classList.remove('hidden');
+      }
+    });
+  </script>
+</body>
+</html>
