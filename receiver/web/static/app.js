@@ -136,7 +136,7 @@ function startCooldown(seconds) {
 }
 
 async function loadInbox() {
-  const res = await API.request('/inbox/' + encodeURIComponent(currentEmail));
+  const res = await API.request('/api/inbox/' + encodeURIComponent(currentEmail));
   if (!res || !res.ok) return;
   const data = await res.json();
   messages = data.data || data || [];
@@ -168,8 +168,8 @@ function updateSSEStatus(status) {
 
 async function openMessage(id) {
   const [msgRes, attRes] = await Promise.all([
-    API.request('/message/' + id),
-    API.request('/message/' + id + '/attachments'),
+    API.request('/api/message/' + id),
+    API.request('/api/message/' + id + '/attachments'),
   ]);
   if (!msgRes || !msgRes.ok) return;
   selectedMsg = await msgRes.json();
@@ -179,7 +179,7 @@ async function openMessage(id) {
 
 async function deleteMessage(id) {
   if (!confirm('Delete this message?')) return;
-  await API.request('/message/' + id, { method: 'DELETE' });
+  await API.request('/api/message/' + id, { method: 'DELETE' });
   selectedMsg = null;
   renderMessage();
   loadInbox();
@@ -187,7 +187,7 @@ async function deleteMessage(id) {
 
 async function deleteInbox() {
   if (!confirm('Delete all messages for ' + currentEmail + '?')) return;
-  await API.request('/inbox/' + encodeURIComponent(currentEmail), { method: 'DELETE' });
+  await API.request('/api/inbox/' + encodeURIComponent(currentEmail), { method: 'DELETE' });
   selectedMsg = null;
   messages = [];
   renderMessage();

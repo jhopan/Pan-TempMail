@@ -128,7 +128,7 @@ func ReceiveEmailViaHTTP(c *gin.Context) {
 			attachmentsDir = "data/attachments"
 		}
 		_ = os.MkdirAll(attachmentsDir, 0755)
-		uniqueName := fmt.Sprintf("%d_%s_%s", time.Now().UnixNano(), i, att.FileName)
+		uniqueName := fmt.Sprintf("%d_%d_%s", time.Now().UnixNano(), i, att.FileName)
 		filePath := attachmentsDir + "/" + uniqueName
 		if err := os.WriteFile(filePath, att.Data, 0644); err != nil {
 			continue

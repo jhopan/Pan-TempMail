@@ -1,0 +1,12 @@
+[Unit]
+Description=Backup TempMail SQLite database
+After=tempmail.service
+
+[Service]
+Type=oneshot
+User=tempmail
+Group=tempmail
+ExecStart=/usr/bin/install -d -m 0750 -o tempmail -g tempmail /opt/tempmail/backups
+ExecStart=/usr/bin/sqlite3 /opt/tempmail/data/tempmail.db ".backup '/opt/tempmail/backups/tempmail.db'"
+ExecStart=/usr/bin/find /opt/tempmail/backups -type f -name 'tempmail-*.db' -mtime +7 -delete
+ExecStart=/bin/sh -c '/bin/cp /opt/tempmail/backups/tempmail.db /opt/tempmail/backups/tempmail-$$(date +%%F).db'

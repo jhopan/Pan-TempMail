@@ -1,0 +1,22 @@
+[Unit]
+Description=TempMail ultra-light email automation API
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=tempmail
+Group=tempmail
+WorkingDirectory=/opt/tempmail
+EnvironmentFile=/etc/tempmail/tempmail.env
+ExecStart=/opt/tempmail/tempmail
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ReadWritePaths=/opt/tempmail/data
+
+[Install]
+WantedBy=multi-user.target

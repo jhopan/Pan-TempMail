@@ -1,6 +1,8 @@
 # Binaries
 receiver/receiver-final
 receiver/receiver-v2
+receiver/tempmail-linux
+receiver/tempmail-linux-arm64
 *.exe
 
 # Go
