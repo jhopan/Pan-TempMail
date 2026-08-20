@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# TempMail Armbian control panel. Run: menutempmail (or sudo tempmailctl)
+# TempMail By JhopanStore control panel. Run: menutempmail (or sudo tempmailctl)
 set -euo pipefail
 
 APP=/opt/tempmail
@@ -15,9 +15,10 @@ need_root() {
 
 load_cf() {
   [ -f "$CF_ENV" ] && . "$CF_ENV"
-  EMAIL_DOMAIN=${EMAIL_DOMAIN:-}
+  EMAIL_DOMAINS=${EMAIL_DOMAINS:-${EMAIL_DOMAIN:-}}
+  EMAIL_DOMAIN=${EMAIL_DOMAINS%%,*}
   WEB_HOST=${WEB_HOST:-}
-  BACKUP_EMAIL=${BACKUP_EMAIL:-jhopanstore@gmail.com}
+  COPY_DESTINATIONS=${COPY_DESTINATIONS:-}
   TUNNEL_ID=${TUNNEL_ID:-}
   WRANGLER_ACCOUNT=${WRANGLER_ACCOUNT:-}
   TUNNEL_ACCOUNT=${TUNNEL_ACCOUNT:-}
@@ -28,9 +29,9 @@ load_cf() {
 save_cf() {
   umask 077
   cat >"$CF_ENV" <<EOF
-EMAIL_DOMAIN=$EMAIL_DOMAIN
+EMAIL_DOMAINS=$EMAIL_DOMAINS
 WEB_HOST=$WEB_HOST
-BACKUP_EMAIL=$BACKUP_EMAIL
+COPY_DESTINATIONS=$COPY_DESTINATIONS
 TUNNEL_ID=$TUNNEL_ID
 WRANGLER_ACCOUNT=$WRANGLER_ACCOUNT
 TUNNEL_ACCOUNT=$TUNNEL_ACCOUNT
@@ -64,10 +65,10 @@ dashboard() {
   [ -n "$WRANGLER_ACCOUNT" ] && wrangler_state="login: $WRANGLER_ACCOUNT" || wrangler_state='belum login'
   [ -n "$TUNNEL_ACCOUNT" ] && tunnel_state="login: $TUNNEL_ACCOUNT" || tunnel_state='belum login'
 
-  echo '=== TempMail Dashboard ==='
+  echo '=== TempMail By JhopanStore ==='
   printf 'TempMail       : %s | %s\n' "${service:-inactive}" "${rss:-0 MiB}"
   printf 'Web LAN        : http://192.168.11.23:8080/app/\n'
-  printf 'Email domain   : %s\n' "$domains"
+  printf 'Domain TempMail: %s\n' "$domains"
   printf 'Inbox          : %s inbox | %s message\n' "$inboxes" "$messages"
   printf 'SQLite backup  : %s | last: %s\n' "${backup:-inactive}" "$last_backup"
   printf 'Wrangler       : %s\n' "$wrangler_state"
@@ -76,8 +77,8 @@ dashboard() {
   printf 'Tunnel UUID    : %s\n' "${TUNNEL_ID:-belum dibuat}"
   printf 'Web hostname   : %s\n' "${WEB_HOST:-belum diatur}"
   printf 'Worker         : %s\n' "$( [ "$WORKER_DEPLOYED" = yes ] && echo 'deployed' || echo 'belum deploy' )"
-  printf 'Email Routing  : %s\n' "$( [ "$EMAIL_ROUTING" = yes ] && echo "active: *@$EMAIL_DOMAIN" || echo 'belum diatur' )"
-  printf 'Gmail backup   : %s\n' "$BACKUP_EMAIL"
+  printf 'Email Routing  : %s\n' "$( [ "$EMAIL_ROUTING" = yes ] && echo "active: *@[$EMAIL_DOMAINS]" || echo 'belum diatur' )"
+  printf 'Salinan email  : %s\n' "${COPY_DESTINATIONS:-OFF}"
 }
 
 ensure_worker_tools() {
@@ -90,17 +91,25 @@ ensure_worker_tools() {
 
 configure_domain() {
   load_cf
-  read -r -p "Email domain (example: tempmail.example.com): " input_domain
-  [ -n "$input_domain" ] || { echo "Domain required."; return; }
-  read -r -p "Web hostname [mail.$input_domain]: " input_web
-  EMAIL_DOMAIN=$input_domain
-  WEB_HOST=${input_web:-mail.$input_domain}
-  read -r -p "Gmail backup [$BACKUP_EMAIL]: " input_backup
-  BACKUP_EMAIL=${input_backup:-$BACKUP_EMAIL}
+  read -r -p "Domain email, pisahkan koma bila banyak [$EMAIL_DOMAINS]: " input_domains
+  EMAIL_DOMAINS=${input_domains:-$EMAIL_DOMAINS}
+  [ -n "$EMAIL_DOMAINS" ] || { echo "Minimal satu domain diperlukan."; return; }
+  EMAIL_DOMAIN=${EMAIL_DOMAINS%%,*}
+  read -r -p "Hostname web [mail.$EMAIL_DOMAIN]: " input_web
+  WEB_HOST=${input_web:-mail.$EMAIL_DOMAIN}
   save_cf
-  set_app_env DOMAINS "$EMAIL_DOMAIN"
+  set_app_env DOMAINS "$EMAIL_DOMAINS"
   systemctl restart tempmail
-  echo "Saved. TempMail now uses @$EMAIL_DOMAIN."
+  echo "Saved. TempMail menerima: @$EMAIL_DOMAINS"
+}
+
+manage_copy_destinations() {
+  load_cf
+  echo "Tujuan salinan sekarang: ${COPY_DESTINATIONS:-OFF}"
+  read -r -p "Email tujuan, pisahkan koma. Kosongkan untuk OFF: " input
+  COPY_DESTINATIONS=$input
+  save_cf
+  echo "Tersimpan. Pilih Deploy/update Worker agar Cloudflare memakai perubahan ini."
 }
 
 wrangler_login() {
@@ -193,29 +202,30 @@ deploy_worker() {
   (cd "$WORKER_DIR" && \
     printf '%s\n' "https://$WEB_HOST" | npx wrangler secret put TEMPMAIL_SERVER_URL && \
     printf '%s\n' "$api_key" | npx wrangler secret put TEMPMAIL_API_KEY && \
-    printf '%s\n' "$BACKUP_EMAIL" | npx wrangler secret put FORWARD_LIST && \
+    printf '%s\n' "$COPY_DESTINATIONS" | npx wrangler secret put FORWARD_LIST && \
     npx wrangler deploy)
   WORKER_DEPLOYED=yes
   save_cf
   systemctl restart tempmail
-  echo "Worker deployed. Gmail backup: $BACKUP_EMAIL"
+  echo "Worker deployed. Salinan email: ${COPY_DESTINATIONS:-OFF}"
 }
 
 enable_email_routing() {
   load_cf
-  [ -n "$EMAIL_DOMAIN" ] || { echo "Configure domain first."; return; }
+  [ -n "$EMAIL_DOMAINS" ] || { echo "Configure domain first."; return; }
   echo "Need API Token: Zone Read, DNS Edit, Email Routing Edit, Workers Scripts Edit."
   read -r -s -p "Cloudflare API token (not saved): " token; echo
   [ -n "$token" ] || return
-  read -r -p "WARNING: route ALL *@$EMAIL_DOMAIN to Worker tempmail-email-worker? [y/N]: " yes
+  read -r -p "WARNING: route ALL *@[$EMAIL_DOMAINS] to Worker tempmail-email-worker? [y/N]: " yes
   [ "$yes" = y ] || { echo "Cancelled."; return; }
 
-  CF_TOKEN="$token" DOMAIN="$EMAIL_DOMAIN" python3 - <<'PY'
+  CF_TOKEN="$token" DOMAINS="$EMAIL_DOMAINS" python3 - <<'PY'
 import json, os
 from urllib.request import Request, urlopen
 
 base = 'https://api.cloudflare.com/client/v4'
-token, domain = os.environ['CF_TOKEN'], os.environ['DOMAIN']
+token = os.environ['CF_TOKEN']
+domains = [item.strip() for item in os.environ['DOMAINS'].split(',') if item.strip()]
 def call(method, path, body=None):
     req = Request(base + path, method=method,
         data=json.dumps(body).encode() if body is not None else None,
@@ -223,40 +233,31 @@ def call(method, path, body=None):
     with urlopen(req, timeout=30) as response:
         data = json.load(response)
     if not data.get('success'):
-        raise SystemExit(json.dumps(data.get('errors', data)))
+        raise RuntimeError(json.dumps(data.get('errors', data)))
     return data['result']
 
-zones = call('GET', '/zones?name=' + domain)
-if not zones or zones[0].get('status') != 'active':
-    raise SystemExit('Zone missing or not Active: ' + domain)
-zid = zones[0]['id']
-try:
-    call('POST', f'/zones/{zid}/email/routing/enable', {})
-except Exception:
-    pass
 body = {'name':'TempMail catch-all', 'enabled':True,
         'actions':[{'type':'worker', 'value':['tempmail-email-worker']}],
         'matchers':[{'type':'all'}]}
-call('PUT', f'/zones/{zid}/email/routing/rules/catch_all', body)
-print('Email Routing enabled and catch-all configured.')
+for domain in domains:
+    zones = call('GET', '/zones?name=' + domain)
+    if not zones or zones[0].get('status') != 'active':
+        raise SystemExit('Zone missing or not Active: ' + domain)
+    zid = zones[0]['id']
+    try:
+        call('POST', f'/zones/{zid}/email/routing/enable', {})
+    except RuntimeError:
+        pass
+    call('PUT', f'/zones/{zid}/email/routing/rules/catch_all', body)
+    print('Email Routing active: *@' + domain)
 PY
   EMAIL_ROUTING=yes
   save_cf
-  echo "Cloudflare may send a verification email for $BACKUP_EMAIL. Verify it before sending real mail."
+  [ -n "$COPY_DESTINATIONS" ] && echo "Verify each email tujuan salinan in Cloudflare before using it."
 }
 
 status() {
-  load_cf
-  echo "=== TempMail ==="
-  systemctl is-active tempmail || true
-  curl -fsS http://127.0.0.1:8080/health || true
-  echo
-  echo "=== Backup timer ==="
-  systemctl is-active tempmail-backup.timer || true
-  echo "=== Tunnel ==="
-  systemctl is-active cloudflared 2>/dev/null || echo "not configured"
-  echo "=== Config ==="
-  printf 'Email domain: %s\nWeb URL: https://%s/app/\nBackup: %s\n' "$EMAIL_DOMAIN" "$WEB_HOST" "$BACKUP_EMAIL"
+  dashboard
   [ -n "$WEB_HOST" ] && curl -fsS "https://$WEB_HOST/health" && echo || true
 }
 
@@ -280,20 +281,21 @@ main() {
   while true; do
     dashboard
     echo
-    echo "=== TempMail Armbian Control ==="
+    echo "=== Control Panel ==="
     echo "1. Login Wrangler Cloudflare"
     echo "2. Login Cloudflare Tunnel"
-    echo "3. Atur domain email + web hostname + Gmail backup"
-    echo "4. AUTO SETUP semua setelah login"
-    echo "5. Deploy/update Email Worker + secret"
-    echo "6. Aktifkan Email Routing catch-all"
-    echo "7. Refresh status"
+    echo "3. Atur satu/lebih domain TempMail + hostname web"
+    echo "4. Atur tujuan salinan email (default OFF)"
+    echo "5. AUTO SETUP Cloudflare setelah login"
+    echo "6. Deploy/update Email Worker + secret"
+    echo "7. Aktifkan Email Routing catch-all"
+    echo "8. Refresh status"
     echo "0. Exit"
     read -r -p "Choose: " choice
     case "$choice" in
       1) wrangler_login ;; 2) tunnel_login ;; 3) configure_domain ;;
-      4) full_setup ;; 5) deploy_worker ;; 6) enable_email_routing ;;
-      7) status ;; 0) exit 0 ;; *) echo "Invalid option." ;;
+      4) manage_copy_destinations ;; 5) full_setup ;; 6) deploy_worker ;;
+      7) enable_email_routing ;; 8) status ;; 0) exit 0 ;; *) echo "Invalid option." ;;
     esac
   done
 }

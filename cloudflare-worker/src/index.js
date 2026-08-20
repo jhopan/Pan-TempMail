@@ -25,10 +25,18 @@ export default {
     const serverUrl = env.TEMPMAIL_SERVER_URL || "https://your-vps.com";
     const apiKey = env.TEMPMAIL_API_KEY || "";
 
-    // Gmail remains source-of-truth backup, even while Armbian is healthy.
-    // Worker delivery to TempMail is a second copy for UI/API automation.
-    if (env.FORWARD_LIST) {
-      await message.forward(env.FORWARD_LIST);
+    // Optional copies. Empty by default: email goes only to TempMail.
+    // Multiple destinations may be comma-separated in FORWARD_LIST.
+    const destinations = (env.FORWARD_LIST || "")
+      .split(",")
+      .map((address) => address.trim())
+      .filter(Boolean);
+    for (const destination of destinations) {
+      try {
+        await message.forward(destination);
+      } catch (error) {
+        console.error(`Copy to ${destination} failed:`, error);
+      }
     }
 
     try {

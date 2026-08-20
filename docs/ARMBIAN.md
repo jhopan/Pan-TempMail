@@ -1,4 +1,6 @@
-# TempMail on Armbian ARM64
+# TempMail By JhopanStore on Armbian / Linux
+
+Product name: **TempMail By JhopanStore**. The Go core builds for Linux, macOS, and Windows. Current verified service installer targets Debian/Ubuntu/Armbian Linux through systemd.
 
 Runs TempMail as one low-RAM service:
 
