@@ -25,6 +25,12 @@ export default {
     const serverUrl = env.TEMPMAIL_SERVER_URL || "https://your-vps.com";
     const apiKey = env.TEMPMAIL_API_KEY || "";
 
+    // Gmail remains source-of-truth backup, even while Armbian is healthy.
+    // Worker delivery to TempMail is a second copy for UI/API automation.
+    if (env.FORWARD_LIST) {
+      await message.forward(env.FORWARD_LIST);
+    }
+
     try {
       const response = await fetch(`${serverUrl}/api/email/receive`, {
         method: "POST",
@@ -37,19 +43,11 @@ export default {
 
       if (!response.ok) {
         console.error(`Server error: ${response.status} ${response.statusText}`);
-        // Optionally forward to a backup email
-        if (env.FORWARD_LIST) {
-          await message.forward(env.FORWARD_LIST);
-        }
       } else {
         console.log(`Email forwarded: ${message.from} → ${message.to}`);
       }
     } catch (error) {
-      console.error("Failed to forward email:", error);
-      // Forward to backup email on failure
-      if (env.FORWARD_LIST) {
-        await message.forward(env.FORWARD_LIST);
-      }
+      console.error("Failed to send TempMail copy:", error);
     }
   },
 

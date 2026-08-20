@@ -1,0 +1,252 @@
+#!/usr/bin/env bash
+# TempMail Armbian control panel. Run: sudo tempmailctl
+set -euo pipefail
+
+APP=/opt/tempmail
+ENV_DIR=/etc/tempmail
+APP_ENV=$ENV_DIR/tempmail.env
+CF_ENV=$ENV_DIR/cloudflare.env
+WORKER_DIR=$APP/worker
+TUNNEL_NAME=tempmail-armbian
+
+need_root() {
+  [ "$(id -u)" = 0 ] || { echo "Run: sudo tempmailctl"; exit 1; }
+}
+
+load_cf() {
+  [ -f "$CF_ENV" ] && . "$CF_ENV"
+  EMAIL_DOMAIN=${EMAIL_DOMAIN:-}
+  WEB_HOST=${WEB_HOST:-}
+  BACKUP_EMAIL=${BACKUP_EMAIL:-jhopanstore@gmail.com}
+  TUNNEL_ID=${TUNNEL_ID:-}
+}
+
+save_cf() {
+  umask 077
+  cat >"$CF_ENV" <<EOF
+EMAIL_DOMAIN=$EMAIL_DOMAIN
+WEB_HOST=$WEB_HOST
+BACKUP_EMAIL=$BACKUP_EMAIL
+TUNNEL_ID=$TUNNEL_ID
+EOF
+}
+
+set_app_env() {
+  local key=$1 value=$2 tmp
+  tmp=$(mktemp)
+  grep -v "^${key}=" "$APP_ENV" >"$tmp" || true
+  printf '%s=%s\n' "$key" "$value" >>"$tmp"
+  install -o root -g tempmail -m 0640 "$tmp" "$APP_ENV"
+  rm -f "$tmp"
+}
+
+ensure_worker_tools() {
+  if ! command -v npm >/dev/null 2>&1; then
+    echo "Installing Node.js and npm for Wrangler..."
+    apt-get update -qq
+    apt-get install -y -qq nodejs npm
+  fi
+}
+
+configure_domain() {
+  load_cf
+  read -r -p "Email domain (example: tempmail.example.com): " input_domain
+  [ -n "$input_domain" ] || { echo "Domain required."; return; }
+  read -r -p "Web hostname [mail.$input_domain]: " input_web
+  EMAIL_DOMAIN=$input_domain
+  WEB_HOST=${input_web:-mail.$input_domain}
+  read -r -p "Gmail backup [$BACKUP_EMAIL]: " input_backup
+  BACKUP_EMAIL=${input_backup:-$BACKUP_EMAIL}
+  save_cf
+  set_app_env DOMAINS "$EMAIL_DOMAIN"
+  systemctl restart tempmail
+  echo "Saved. TempMail now uses @$EMAIL_DOMAIN."
+}
+
+wrangler_login() {
+  ensure_worker_tools
+  [ -d "$WORKER_DIR" ] || { echo "Worker files missing: $WORKER_DIR"; return; }
+  echo "Browser login URL will appear. Open it, login Cloudflare, click Allow."
+  (cd "$WORKER_DIR" && npx wrangler login)
+}
+
+wrangler_whoami() {
+  ensure_worker_tools
+  (cd "$WORKER_DIR" && npx wrangler whoami)
+}
+
+tunnel_login() {
+  echo "Browser login URL will appear. Open it, login Cloudflare, select your active domain."
+  cloudflared tunnel login
+}
+
+create_tunnel() {
+  load_cf
+  [ -n "$WEB_HOST" ] || { echo "Configure domain first."; return; }
+  [ -f /root/.cloudflared/cert.pem ] || { echo "Tunnel login required first."; return; }
+
+  local list name id config
+  list=$(cloudflared tunnel list --output json)
+  id=$(python3 - "$TUNNEL_NAME" "$list" <<'PY'
+import json, sys
+name, data = sys.argv[1:]
+for item in json.loads(data):
+    if item['name'] == name:
+        print(item['id'])
+        break
+PY
+)
+  if [ -z "$id" ]; then
+    cloudflared tunnel create "$TUNNEL_NAME"
+    list=$(cloudflared tunnel list --output json)
+    id=$(python3 - "$TUNNEL_NAME" "$list" <<'PY'
+import json, sys
+name, data = sys.argv[1:]
+for item in json.loads(data):
+    if item['name'] == name:
+        print(item['id'])
+        break
+PY
+)
+  fi
+  [ -n "$id" ] || { echo "Could not create/find tunnel."; return; }
+
+  TUNNEL_ID=$id
+  save_cf
+  install -d -m 0755 /etc/cloudflared
+  cat >/etc/cloudflared/config.yml <<EOF
+ tunnel: $TUNNEL_ID
+ credentials-file: /root/.cloudflared/$TUNNEL_ID.json
+
+ ingress:
+   - hostname: $WEB_HOST
+     service: http://127.0.0.1:8080
+   - service: http_status:404
+EOF
+  sed -i 's/^ //' /etc/cloudflared/config.yml
+  cloudflared tunnel route dns "$TUNNEL_NAME" "$WEB_HOST"
+  cloudflared service install
+  systemctl enable --now cloudflared
+  echo "Tunnel active: https://$WEB_HOST/app/"
+}
+
+deploy_worker() {
+  load_cf
+  [ -n "$WEB_HOST" ] || { echo "Configure domain and tunnel first."; return; }
+  [ -d "$WORKER_DIR" ] || { echo "Worker files missing."; return; }
+  ensure_worker_tools
+
+  local api_key
+  api_key=$(grep '^EMAIL_API_KEY=' "$APP_ENV" | cut -d= -f2-)
+  if [ -z "$api_key" ]; then
+    api_key=$(openssl rand -hex 32)
+    set_app_env EMAIL_API_KEY "$api_key"
+  fi
+  (cd "$WORKER_DIR" && \
+    printf '%s\n' "https://$WEB_HOST" | npx wrangler secret put TEMPMAIL_SERVER_URL && \
+    printf '%s\n' "$api_key" | npx wrangler secret put TEMPMAIL_API_KEY && \
+    printf '%s\n' "$BACKUP_EMAIL" | npx wrangler secret put FORWARD_LIST && \
+    npx wrangler deploy)
+  systemctl restart tempmail
+  echo "Worker deployed. Gmail backup: $BACKUP_EMAIL"
+}
+
+enable_email_routing() {
+  load_cf
+  [ -n "$EMAIL_DOMAIN" ] || { echo "Configure domain first."; return; }
+  echo "Need API Token: Zone Read, DNS Edit, Email Routing Edit, Workers Scripts Edit."
+  read -r -s -p "Cloudflare API token (not saved): " token; echo
+  [ -n "$token" ] || return
+  read -r -p "WARNING: route ALL *@$EMAIL_DOMAIN to Worker tempmail-email-worker? [y/N]: " yes
+  [ "$yes" = y ] || { echo "Cancelled."; return; }
+
+  CF_TOKEN="$token" DOMAIN="$EMAIL_DOMAIN" python3 - <<'PY'
+import json, os
+from urllib.request import Request, urlopen
+
+base = 'https://api.cloudflare.com/client/v4'
+token, domain = os.environ['CF_TOKEN'], os.environ['DOMAIN']
+def call(method, path, body=None):
+    req = Request(base + path, method=method,
+        data=json.dumps(body).encode() if body is not None else None,
+        headers={'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'})
+    with urlopen(req, timeout=30) as response:
+        data = json.load(response)
+    if not data.get('success'):
+        raise SystemExit(json.dumps(data.get('errors', data)))
+    return data['result']
+
+zones = call('GET', '/zones?name=' + domain)
+if not zones or zones[0].get('status') != 'active':
+    raise SystemExit('Zone missing or not Active: ' + domain)
+zid = zones[0]['id']
+try:
+    call('POST', f'/zones/{zid}/email/routing/enable', {})
+except Exception:
+    pass
+body = {'name':'TempMail catch-all', 'enabled':True,
+        'actions':[{'type':'worker', 'value':['tempmail-email-worker']}],
+        'matchers':[{'type':'all'}]}
+call('PUT', f'/zones/{zid}/email/routing/rules/catch_all', body)
+print('Email Routing enabled and catch-all configured.')
+PY
+  echo "Cloudflare may send a verification email for $BACKUP_EMAIL. Verify it before sending real mail."
+}
+
+status() {
+  load_cf
+  echo "=== TempMail ==="
+  systemctl is-active tempmail || true
+  curl -fsS http://127.0.0.1:8080/health || true
+  echo
+  echo "=== Backup timer ==="
+  systemctl is-active tempmail-backup.timer || true
+  echo "=== Tunnel ==="
+  systemctl is-active cloudflared 2>/dev/null || echo "not configured"
+  echo "=== Config ==="
+  printf 'Email domain: %s\nWeb URL: https://%s/app/\nBackup: %s\n' "$EMAIL_DOMAIN" "$WEB_HOST" "$BACKUP_EMAIL"
+  [ -n "$WEB_HOST" ] && curl -fsS "https://$WEB_HOST/health" && echo || true
+}
+
+full_setup() {
+  configure_domain
+  echo "\nStep 1/5: Wrangler login"
+  wrangler_login
+  echo "\nStep 2/5: Tunnel login"
+  tunnel_login
+  echo "\nStep 3/5: Create tunnel"
+  create_tunnel
+  echo "\nStep 4/5: Deploy Worker"
+  deploy_worker
+  echo "\nStep 5/5: Email Routing"
+  enable_email_routing
+  status
+}
+
+main() {
+  need_root
+  while true; do
+    load_cf
+    echo
+    echo "=== TempMail Armbian Control ==="
+    echo "1. Initial domain/web/Gmail configuration"
+    echo "2. Login Wrangler Cloudflare"
+    echo "3. Show Wrangler login/account"
+    echo "4. Login Cloudflare Tunnel"
+    echo "5. Create Tunnel + web hostname + service"
+    echo "6. Deploy Email Worker + secrets"
+    echo "7. Enable Email Routing catch-all"
+    echo "8. Full setup, step by step"
+    echo "9. Status and health checks"
+    echo "0. Exit"
+    read -r -p "Choose: " choice
+    case "$choice" in
+      1) configure_domain ;; 2) wrangler_login ;; 3) wrangler_whoami ;;
+      4) tunnel_login ;; 5) create_tunnel ;; 6) deploy_worker ;;
+      7) enable_email_routing ;; 8) full_setup ;; 9) status ;;
+      0) exit 0 ;; *) echo "Invalid option." ;;
+    esac
+  done
+}
+
+main "$@"
