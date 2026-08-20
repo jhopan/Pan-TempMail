@@ -19,6 +19,10 @@ load_cf() {
   WEB_HOST=${WEB_HOST:-}
   BACKUP_EMAIL=${BACKUP_EMAIL:-jhopanstore@gmail.com}
   TUNNEL_ID=${TUNNEL_ID:-}
+  WRANGLER_ACCOUNT=${WRANGLER_ACCOUNT:-}
+  TUNNEL_ACCOUNT=${TUNNEL_ACCOUNT:-}
+  WORKER_DEPLOYED=${WORKER_DEPLOYED:-no}
+  EMAIL_ROUTING=${EMAIL_ROUTING:-no}
 }
 
 save_cf() {
@@ -28,6 +32,10 @@ EMAIL_DOMAIN=$EMAIL_DOMAIN
 WEB_HOST=$WEB_HOST
 BACKUP_EMAIL=$BACKUP_EMAIL
 TUNNEL_ID=$TUNNEL_ID
+WRANGLER_ACCOUNT=$WRANGLER_ACCOUNT
+TUNNEL_ACCOUNT=$TUNNEL_ACCOUNT
+WORKER_DEPLOYED=$WORKER_DEPLOYED
+EMAIL_ROUTING=$EMAIL_ROUTING
 EOF
 }
 
@@ -38,6 +46,38 @@ set_app_env() {
   printf '%s=%s\n' "$key" "$value" >>"$tmp"
   install -o root -g tempmail -m 0640 "$tmp" "$APP_ENV"
   rm -f "$tmp"
+}
+
+dashboard() {
+  load_cf
+  local service backup tunnel rss inboxes messages last_backup domains wrangler_state tunnel_state
+  service=$(systemctl is-active tempmail 2>/dev/null || true)
+  backup=$(systemctl is-active tempmail-backup.timer 2>/dev/null || true)
+  tunnel=$(systemctl is-active cloudflared 2>/dev/null || true)
+  rss=$(ps -o rss= -C tempmail 2>/dev/null | awk 'NR==1 {printf "%.1f MiB", $1/1024}')
+  inboxes=$(sqlite3 "$APP/data/tempmail.db" 'SELECT count(*) FROM inboxes;' 2>/dev/null || echo 0)
+  messages=$(sqlite3 "$APP/data/tempmail.db" 'SELECT count(*) FROM messages;' 2>/dev/null || echo 0)
+  last_backup=$(find "$APP/backups" -maxdepth 1 -type f -name 'tempmail-*.db' -printf '%TY-%Tm-%Td %TH:%TM\n' 2>/dev/null | sort | tail -1)
+  domains=$(grep '^DOMAINS=' "$APP_ENV" 2>/dev/null | cut -d= -f2-)
+  [ -n "$domains" ] || domains='belum diatur'
+  [ -n "$last_backup" ] || last_backup='belum ada'
+  [ -n "$WRANGLER_ACCOUNT" ] && wrangler_state="login: $WRANGLER_ACCOUNT" || wrangler_state='belum login'
+  [ -n "$TUNNEL_ACCOUNT" ] && tunnel_state="login: $TUNNEL_ACCOUNT" || tunnel_state='belum login'
+
+  echo '=== TempMail Dashboard ==='
+  printf 'TempMail       : %s | %s\n' "${service:-inactive}" "${rss:-0 MiB}"
+  printf 'Web LAN        : http://192.168.11.23:8080/app/\n'
+  printf 'Email domain   : %s\n' "$domains"
+  printf 'Inbox          : %s inbox | %s message\n' "$inboxes" "$messages"
+  printf 'SQLite backup  : %s | last: %s\n' "${backup:-inactive}" "$last_backup"
+  printf 'Wrangler       : %s\n' "$wrangler_state"
+  printf 'CF Tunnel      : %s | %s\n' "$tunnel_state" "${tunnel:-not configured}"
+  printf 'Tunnel name    : %s\n' "$TUNNEL_NAME"
+  printf 'Tunnel UUID    : %s\n' "${TUNNEL_ID:-belum dibuat}"
+  printf 'Web hostname   : %s\n' "${WEB_HOST:-belum diatur}"
+  printf 'Worker         : %s\n' "$( [ "$WORKER_DEPLOYED" = yes ] && echo 'deployed' || echo 'belum deploy' )"
+  printf 'Email Routing  : %s\n' "$( [ "$EMAIL_ROUTING" = yes ] && echo "active: *@$EMAIL_DOMAIN" || echo 'belum diatur' )"
+  printf 'Gmail backup   : %s\n' "$BACKUP_EMAIL"
 }
 
 ensure_worker_tools() {
@@ -68,6 +108,11 @@ wrangler_login() {
   [ -d "$WORKER_DIR" ] || { echo "Worker files missing: $WORKER_DIR"; return; }
   echo "Browser login URL will appear. Open it, login Cloudflare, click Allow."
   (cd "$WORKER_DIR" && npx wrangler login)
+  local info
+  info=$(cd "$WORKER_DIR" && npx wrangler whoami 2>/dev/null || true)
+  WRANGLER_ACCOUNT=$(printf '%s\n' "$info" | sed -n 's/^.*Account Name: *//p' | head -1)
+  [ -n "$WRANGLER_ACCOUNT" ] || WRANGLER_ACCOUNT='logged in'
+  save_cf
 }
 
 wrangler_whoami() {
@@ -78,6 +123,9 @@ wrangler_whoami() {
 tunnel_login() {
   echo "Browser login URL will appear. Open it, login Cloudflare, select your active domain."
   cloudflared tunnel login
+  read -r -p "Cloudflare account email/name used for tunnel (status label only): " TUNNEL_ACCOUNT
+  [ -n "$TUNNEL_ACCOUNT" ] || TUNNEL_ACCOUNT='logged in'
+  save_cf
 }
 
 create_tunnel() {
@@ -147,6 +195,8 @@ deploy_worker() {
     printf '%s\n' "$api_key" | npx wrangler secret put TEMPMAIL_API_KEY && \
     printf '%s\n' "$BACKUP_EMAIL" | npx wrangler secret put FORWARD_LIST && \
     npx wrangler deploy)
+  WORKER_DEPLOYED=yes
+  save_cf
   systemctl restart tempmail
   echo "Worker deployed. Gmail backup: $BACKUP_EMAIL"
 }
@@ -190,6 +240,8 @@ body = {'name':'TempMail catch-all', 'enabled':True,
 call('PUT', f'/zones/{zid}/email/routing/rules/catch_all', body)
 print('Email Routing enabled and catch-all configured.')
 PY
+  EMAIL_ROUTING=yes
+  save_cf
   echo "Cloudflare may send a verification email for $BACKUP_EMAIL. Verify it before sending real mail."
 }
 
@@ -226,7 +278,7 @@ full_setup() {
 main() {
   need_root
   while true; do
-    load_cf
+    dashboard
     echo
     echo "=== TempMail Armbian Control ==="
     echo "1. Initial domain/web/Gmail configuration"
