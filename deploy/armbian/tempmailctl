@@ -1,43 +1,48 @@
 #!/usr/bin/env bash
-# TempMail By JhopanStore control panel. Run: menutempmail (or sudo tempmailctl)
+# TempMail By JhopanStore control panel. Run: menutempmail
 set -euo pipefail
 
 APP=/opt/tempmail
 ENV_DIR=/etc/tempmail
 APP_ENV=$ENV_DIR/tempmail.env
-CF_ENV=$ENV_DIR/cloudflare.env
+STATE=$ENV_DIR/cloudflare-state.json
 WORKER_DIR=$APP/worker
-TUNNEL_NAME=tempmail-armbian
+TUNNEL_NAME=tempmail-jhopanstore
 
 need_root() {
-  [ "$(id -u)" = 0 ] || { echo "Run: sudo tempmailctl"; exit 1; }
+  [ "$(id -u)" = 0 ] || { echo "Run: menutempmail"; exit 1; }
 }
 
-load_cf() {
-  [ -f "$CF_ENV" ] && . "$CF_ENV"
-  EMAIL_DOMAINS=${EMAIL_DOMAINS:-${EMAIL_DOMAIN:-}}
-  EMAIL_DOMAIN=${EMAIL_DOMAINS%%,*}
-  WEB_HOST=${WEB_HOST:-}
-  COPY_DESTINATIONS=${COPY_DESTINATIONS:-}
-  TUNNEL_ID=${TUNNEL_ID:-}
-  WRANGLER_ACCOUNT=${WRANGLER_ACCOUNT:-}
-  TUNNEL_ACCOUNT=${TUNNEL_ACCOUNT:-}
-  WORKER_DEPLOYED=${WORKER_DEPLOYED:-no}
-  EMAIL_ROUTING=${EMAIL_ROUTING:-no}
+ensure_state() {
+  install -d -o root -g root -m 0700 "$ENV_DIR"
+  if [ ! -f "$STATE" ]; then
+    printf '{"active_profile":"","profiles":{},"domains":{},"tunnel":{"id":"","account":"","web_hosts":[]}}\n' >"$STATE"
+    chmod 600 "$STATE"
+  fi
 }
 
-save_cf() {
-  umask 077
-  cat >"$CF_ENV" <<EOF
-EMAIL_DOMAINS=$EMAIL_DOMAINS
-WEB_HOST=$WEB_HOST
-COPY_DESTINATIONS=$COPY_DESTINATIONS
-TUNNEL_ID=$TUNNEL_ID
-WRANGLER_ACCOUNT=$WRANGLER_ACCOUNT
-TUNNEL_ACCOUNT=$TUNNEL_ACCOUNT
-WORKER_DEPLOYED=$WORKER_DEPLOYED
-EMAIL_ROUTING=$EMAIL_ROUTING
-EOF
+state_get() {
+  python3 - "$STATE" "$@" <<'PY'
+import json, sys
+state, path = sys.argv[1], sys.argv[2:]
+data = json.load(open(state))
+for key in path:
+    data = data.get(key, '') if isinstance(data, dict) else ''
+print(data if not isinstance(data, (dict, list)) else json.dumps(data))
+PY
+}
+
+refresh_app_domains() {
+  local domains
+  domains=$(python3 - "$STATE" <<'PY'
+import json, sys
+state=json.load(open(sys.argv[1]))
+print(','.join(sorted(name for name, item in state['domains'].items() if item.get('enabled'))))
+PY
+)
+  [ -n "$domains" ] || domains=local.invalid
+  set_app_env DOMAINS "$domains"
+  systemctl restart tempmail
 }
 
 set_app_env() {
@@ -49,253 +54,403 @@ set_app_env() {
   rm -f "$tmp"
 }
 
-dashboard() {
-  load_cf
-  local service backup tunnel rss inboxes messages last_backup domains wrangler_state tunnel_state
-  service=$(systemctl is-active tempmail 2>/dev/null || true)
-  backup=$(systemctl is-active tempmail-backup.timer 2>/dev/null || true)
-  tunnel=$(systemctl is-active cloudflared 2>/dev/null || true)
-  rss=$(ps -o rss= -C tempmail 2>/dev/null | awk 'NR==1 {printf "%.1f MiB", $1/1024}')
-  inboxes=$(sqlite3 "$APP/data/tempmail.db" 'SELECT count(*) FROM inboxes;' 2>/dev/null || echo 0)
-  messages=$(sqlite3 "$APP/data/tempmail.db" 'SELECT count(*) FROM messages;' 2>/dev/null || echo 0)
-  last_backup=$(find "$APP/backups" -maxdepth 1 -type f -name 'tempmail-*.db' -printf '%TY-%Tm-%Td %TH:%TM\n' 2>/dev/null | sort | tail -1)
-  domains=$(grep '^DOMAINS=' "$APP_ENV" 2>/dev/null | cut -d= -f2-)
-  [ -n "$domains" ] || domains='belum diatur'
-  [ -n "$last_backup" ] || last_backup='belum ada'
-  [ -n "$WRANGLER_ACCOUNT" ] && wrangler_state="login: $WRANGLER_ACCOUNT" || wrangler_state='belum login'
-  [ -n "$TUNNEL_ACCOUNT" ] && tunnel_state="login: $TUNNEL_ACCOUNT" || tunnel_state='belum login'
+profile_token() {
+  local profile=$1
+  python3 - "$STATE" "$profile" <<'PY'
+import json, sys
+print(json.load(open(sys.argv[1]))['profiles'][sys.argv[2]]['token'])
+PY
+}
 
-  echo '=== TempMail By JhopanStore ==='
-  printf 'TempMail       : %s | %s\n' "${service:-inactive}" "${rss:-0 MiB}"
-  printf 'Web LAN        : http://192.168.11.23:8080/app/\n'
-  printf 'Domain TempMail: %s\n' "$domains"
-  printf 'Inbox          : %s inbox | %s message\n' "$inboxes" "$messages"
-  printf 'SQLite backup  : %s | last: %s\n' "${backup:-inactive}" "$last_backup"
-  printf 'Wrangler       : %s\n' "$wrangler_state"
-  printf 'CF Tunnel      : %s | %s\n' "$tunnel_state" "${tunnel:-not configured}"
-  printf 'Tunnel name    : %s\n' "$TUNNEL_NAME"
-  printf 'Tunnel UUID    : %s\n' "${TUNNEL_ID:-belum dibuat}"
-  printf 'Web hostname   : %s\n' "${WEB_HOST:-belum diatur}"
-  printf 'Worker         : %s\n' "$( [ "$WORKER_DEPLOYED" = yes ] && echo 'deployed' || echo 'belum deploy' )"
-  printf 'Email Routing  : %s\n' "$( [ "$EMAIL_ROUTING" = yes ] && echo "active: *@[$EMAIL_DOMAINS]" || echo 'belum diatur' )"
-  printf 'Salinan email  : %s\n' "${COPY_DESTINATIONS:-OFF}"
+profile_account_id() {
+  local profile=$1
+  python3 - "$STATE" "$profile" <<'PY'
+import json, sys
+print(json.load(open(sys.argv[1]))['profiles'][sys.argv[2]].get('account_id',''))
+PY
+}
+
+active_profile() {
+  state_get active_profile
+}
+
+choose_profile() {
+  local profile
+  profile=$(active_profile)
+  if [ -z "$profile" ]; then
+    echo "Belum ada akun Cloudflare. Tambahkan dari menu akun." >&2
+    return 1
+  fi
+  printf '%s' "$profile"
+}
+
+cf_api() {
+  local profile=$1 method=$2 path=$3 body=${4:-}
+  local token response
+  token=$(profile_token "$profile")
+  if [ -n "$body" ]; then
+    response=$(curl -fsS -X "$method" "https://api.cloudflare.com/client/v4$path" \
+      -H "Authorization: Bearer $token" -H 'Content-Type: application/json' --data "$body")
+  else
+    response=$(curl -fsS -X "$method" "https://api.cloudflare.com/client/v4$path" \
+      -H "Authorization: Bearer $token")
+  fi
+  printf '%s' "$response" | python3 -c 'import json,sys; d=json.load(sys.stdin); (print(json.dumps(d.get("result"))) if d.get("success") else (_ for _ in ()).throw(SystemExit(json.dumps(d.get("errors",d))))'
+}
+
+zone_id() {
+  local profile=$1 domain=$2 result
+  result=$(cf_api "$profile" GET "/zones?name=$domain")
+  printf '%s' "$result" | python3 - "$domain" <<'PY'
+import json, sys
+items=json.load(sys.stdin)
+domain=sys.argv[1]
+if not items or items[0].get('status') != 'active':
+    raise SystemExit('Zone tidak ditemukan atau belum Active: ' + domain)
+print(items[0]['id'])
+PY
 }
 
 ensure_worker_tools() {
   if ! command -v npm >/dev/null 2>&1; then
-    echo "Installing Node.js and npm for Wrangler..."
+    echo "Install Node.js/npm untuk Wrangler..."
     apt-get update -qq
     apt-get install -y -qq nodejs npm
   fi
 }
 
-configure_domain() {
-  load_cf
-  read -r -p "Domain email, pisahkan koma bila banyak [$EMAIL_DOMAINS]: " input_domains
-  EMAIL_DOMAINS=${input_domains:-$EMAIL_DOMAINS}
-  [ -n "$EMAIL_DOMAINS" ] || { echo "Minimal satu domain diperlukan."; return; }
-  EMAIL_DOMAIN=${EMAIL_DOMAINS%%,*}
-  read -r -p "Hostname web [mail.$EMAIL_DOMAIN]: " input_web
-  WEB_HOST=${input_web:-mail.$EMAIL_DOMAIN}
-  save_cf
-  set_app_env DOMAINS "$EMAIL_DOMAINS"
-  systemctl restart tempmail
-  echo "Saved. TempMail menerima: @$EMAIL_DOMAINS"
+add_cf_profile() {
+  local name account token label
+  read -r -p "ID profil (contoh: cf-a, cf-b): " name
+  [[ "$name" =~ ^[a-zA-Z0-9_-]+$ ]] || { echo "ID hanya huruf/angka/-/_"; return; }
+  read -r -p "Label akun (contoh: Cloudflare A): " label
+  read -r -p "Cloudflare Account ID: " account
+  read -r -s -p "Cloudflare API Token (disimpan root-only): " token; echo
+  [ -n "$name" ] && [ -n "$account" ] && [ -n "$token" ] || { echo "Data wajib diisi."; return; }
+
+  CF_NAME="$name" CF_LABEL="$label" CF_ACCOUNT="$account" CF_TOKEN="$token" python3 - "$STATE" <<'PY'
+import json, os, sys
+path=sys.argv[1]
+data=json.load(open(path))
+data['profiles'][os.environ['CF_NAME']]={
+  'label': os.environ['CF_LABEL'] or os.environ['CF_NAME'],
+  'account_id': os.environ['CF_ACCOUNT'],
+  'token': os.environ['CF_TOKEN'],
+  'worker_deployed': False,
+}
+if not data['active_profile']:
+  data['active_profile']=os.environ['CF_NAME']
+open(path,'w').write(json.dumps(data,indent=2)+'\n')
+PY
+  chmod 600 "$STATE"
+  echo "Profil $name tersimpan. Token tidak ditampilkan dashboard."
 }
 
-manage_copy_destinations() {
-  load_cf
-  echo "Tujuan salinan sekarang: ${COPY_DESTINATIONS:-OFF}"
+select_cf_profile() {
+  local selected
+  python3 - "$STATE" <<'PY'
+import json,sys
+d=json.load(open(sys.argv[1]))
+for key,item in d['profiles'].items(): print(f'{key}\t{item.get("label",key)}')
+PY
+  read -r -p "Pilih ID profil: " selected
+  python3 - "$STATE" "$selected" <<'PY'
+import json,sys
+path,key=sys.argv[1:]
+d=json.load(open(path))
+if key not in d['profiles']: raise SystemExit('Profil tidak ada.')
+d['active_profile']=key
+open(path,'w').write(json.dumps(d,indent=2)+'\n')
+PY
+  echo "Profil aktif: $selected"
+}
+
+remove_cf_profile() {
+  local selected
+  read -r -p "ID profil yang dihapus: " selected
+  read -r -p "Hapus profil $selected? Domain tetap ada namun tidak bisa dikelola sampai dipindah. [y/N]: " yes
+  [ "$yes" = y ] || return
+  python3 - "$STATE" "$selected" <<'PY'
+import json,sys
+path,key=sys.argv[1:]
+d=json.load(open(path))
+if any(v.get('profile') == key for v in d['domains'].values()):
+  raise SystemExit('Masih ada domain memakai profil ini. Hapus/pindahkan domain dulu.')
+d['profiles'].pop(key, None)
+if d['active_profile'] == key: d['active_profile']=''
+open(path,'w').write(json.dumps(d,indent=2)+'\n')
+PY
+}
+
+cf_profiles_menu() {
+  while true; do
+    echo
+    echo "=== Akun Cloudflare ==="
+    python3 - "$STATE" <<'PY'
+import json,sys
+d=json.load(open(sys.argv[1])); active=d.get('active_profile','')
+if not d['profiles']: print('Belum ada profil.')
+for key,item in d['profiles'].items():
+  marker='*' if key==active else ' '
+  print(f'{marker} {key}: {item.get("label",key)} | Account ID: {item.get("account_id","")}')
+PY
+    echo "1. Tambah/login akun Cloudflare"
+    echo "2. Pilih akun aktif"
+    echo "3. Hapus akun Cloudflare"
+    echo "0. Kembali"
+    read -r -p "Choose: " choice
+    case "$choice" in
+      1) add_cf_profile ;; 2) select_cf_profile ;; 3) remove_cf_profile ;; 0) return ;;
+      *) echo "Pilihan salah." ;;
+    esac
+  done
+}
+
+add_domain() {
+  local profile domain zid
+  profile=$(choose_profile) || return
+  read -r -p "Domain TempMail untuk profil $profile: " domain
+  [ -n "$domain" ] || return
+  zid=$(zone_id "$profile" "$domain") || return
+  CF_DOMAIN="$domain" CF_PROFILE="$profile" CF_ZONE="$zid" python3 - "$STATE" <<'PY'
+import json,os,sys
+path=sys.argv[1]; d=json.load(open(path))
+d['domains'][os.environ['CF_DOMAIN']]={'profile':os.environ['CF_PROFILE'],'zone_id':os.environ['CF_ZONE'],'enabled':False,'routing':False}
+open(path,'w').write(json.dumps(d,indent=2)+'\n')
+PY
+  echo "Domain ditambahkan. Pilih aktifkan routing setelah Worker profile ini di-deploy."
+}
+
+list_domains() {
+  python3 - "$STATE" <<'PY'
+import json,sys
+d=json.load(open(sys.argv[1]))
+if not d['domains']: print('Belum ada domain.')
+for name,item in sorted(d['domains'].items()):
+  print(f"{name} | profile={item.get('profile')} | TempMail={'ON' if item.get('enabled') else 'OFF'} | Routing={'ON' if item.get('routing') else 'OFF'}")
+PY
+}
+
+remove_domain() {
+  local domain
+  read -r -p "Domain yang dihapus dari TempMail: " domain
+  read -r -p "Hapus $domain dari TempMail lokal? DNS/Cloudflare tidak dihapus. [y/N]: " yes
+  [ "$yes" = y ] || return
+  CF_DOMAIN="$domain" python3 - "$STATE" <<'PY'
+import json,os,sys
+path=sys.argv[1]; d=json.load(open(path)); d['domains'].pop(os.environ['CF_DOMAIN'],None)
+open(path,'w').write(json.dumps(d,indent=2)+'\n')
+PY
+  refresh_app_domains
+}
+
+domains_menu() {
+  while true; do
+    echo
+    echo "=== Domain TempMail ==="
+    list_domains
+    echo "1. Tambah domain dari akun aktif"
+    echo "2. Hapus domain dari TempMail"
+    echo "3. Refresh domain ke service"
+    echo "0. Kembali"
+    read -r -p "Choose: " choice
+    case "$choice" in
+      1) add_domain ;; 2) remove_domain ;; 3) refresh_app_domains ;; 0) return ;;
+      *) echo "Pilihan salah." ;;
+    esac
+  done
+}
+
+set_copy_destinations() {
+  local current input
+  current=$(state_get_copy)
+  echo "Tujuan salinan sekarang: ${current:-OFF}"
   read -r -p "Email tujuan, pisahkan koma. Kosongkan untuk OFF: " input
-  COPY_DESTINATIONS=$input
-  save_cf
-  echo "Tersimpan. Pilih Deploy/update Worker agar Cloudflare memakai perubahan ini."
+  CF_COPIES="$input" python3 - "$STATE" <<'PY'
+import json,os,sys
+path=sys.argv[1]; d=json.load(open(path)); d['copy_destinations']=os.environ['CF_COPIES']
+open(path,'w').write(json.dumps(d,indent=2)+'\n')
+PY
+  echo "Tersimpan. Deploy Worker profile terkait untuk menerapkan."
 }
 
-wrangler_login() {
+state_get_copy() {
+  python3 - "$STATE" <<'PY'
+import json,sys
+print(json.load(open(sys.argv[1])).get('copy_destinations',''))
+PY
+}
+
+login_wrangler() {
   ensure_worker_tools
-  [ -d "$WORKER_DIR" ] || { echo "Worker files missing: $WORKER_DIR"; return; }
-  echo "Browser login URL will appear. Open it, login Cloudflare, click Allow."
+  echo "Wrangler login hanya convenience. Deploy multi-akun memakai API Token profile aktif."
   (cd "$WORKER_DIR" && npx wrangler login)
-  local info
-  info=$(cd "$WORKER_DIR" && npx wrangler whoami 2>/dev/null || true)
-  WRANGLER_ACCOUNT=$(printf '%s\n' "$info" | sed -n 's/^.*Account Name: *//p' | head -1)
-  [ -n "$WRANGLER_ACCOUNT" ] || WRANGLER_ACCOUNT='logged in'
-  save_cf
-}
-
-wrangler_whoami() {
-  ensure_worker_tools
-  (cd "$WORKER_DIR" && npx wrangler whoami)
 }
 
 tunnel_login() {
-  echo "Browser login URL will appear. Open it, login Cloudflare, select your active domain."
+  echo "Tunnel hanya satu gateway. Login ke akun yang memiliki tunnel utama."
   cloudflared tunnel login
-  read -r -p "Cloudflare account email/name used for tunnel (status label only): " TUNNEL_ACCOUNT
-  [ -n "$TUNNEL_ACCOUNT" ] || TUNNEL_ACCOUNT='logged in'
-  save_cf
+  read -r -p "Label akun tunnel (contoh: CF A): " account
+  CF_TUNNEL_ACCOUNT="${account:-logged in}" python3 - "$STATE" <<'PY'
+import json,os,sys
+path=sys.argv[1]; d=json.load(open(path)); d['tunnel']['account']=os.environ['CF_TUNNEL_ACCOUNT']
+open(path,'w').write(json.dumps(d,indent=2)+'\n')
+PY
 }
 
 create_tunnel() {
-  load_cf
-  [ -n "$WEB_HOST" ] || { echo "Configure domain first."; return; }
-  [ -f /root/.cloudflared/cert.pem ] || { echo "Tunnel login required first."; return; }
-
-  local list name id config
+  local web_host list id
+  read -r -p "Hostname web tunnel (contoh: mail.domain.com): " web_host
+  [ -n "$web_host" ] || return
+  [ -f /root/.cloudflared/cert.pem ] || { echo "Login Tunnel dulu."; return; }
   list=$(cloudflared tunnel list --output json)
   id=$(python3 - "$TUNNEL_NAME" "$list" <<'PY'
-import json, sys
-name, data = sys.argv[1:]
-for item in json.loads(data):
-    if item['name'] == name:
-        print(item['id'])
-        break
+import json,sys
+for item in json.loads(sys.argv[2]):
+  if item['name']==sys.argv[1]: print(item['id']); break
 PY
 )
   if [ -z "$id" ]; then
     cloudflared tunnel create "$TUNNEL_NAME"
     list=$(cloudflared tunnel list --output json)
     id=$(python3 - "$TUNNEL_NAME" "$list" <<'PY'
-import json, sys
-name, data = sys.argv[1:]
-for item in json.loads(data):
-    if item['name'] == name:
-        print(item['id'])
-        break
+import json,sys
+for item in json.loads(sys.argv[2]):
+  if item['name']==sys.argv[1]: print(item['id']); break
 PY
 )
   fi
-  [ -n "$id" ] || { echo "Could not create/find tunnel."; return; }
-
-  TUNNEL_ID=$id
-  save_cf
-  install -d -m 0755 /etc/cloudflared
+  [ -n "$id" ] || { echo "Tunnel gagal dibuat."; return; }
   cat >/etc/cloudflared/config.yml <<EOF
- tunnel: $TUNNEL_ID
- credentials-file: /root/.cloudflared/$TUNNEL_ID.json
-
+ tunnel: $id
+ credentials-file: /root/.cloudflared/$id.json
  ingress:
-   - hostname: $WEB_HOST
+   - hostname: $web_host
      service: http://127.0.0.1:8080
    - service: http_status:404
 EOF
   sed -i 's/^ //' /etc/cloudflared/config.yml
-  cloudflared tunnel route dns "$TUNNEL_NAME" "$WEB_HOST"
+  cloudflared tunnel route dns "$TUNNEL_NAME" "$web_host"
   cloudflared service install
   systemctl enable --now cloudflared
-  echo "Tunnel active: https://$WEB_HOST/app/"
+  CF_TUNNEL_ID="$id" CF_WEB_HOST="$web_host" python3 - "$STATE" <<'PY'
+import json,os,sys
+path=sys.argv[1]; d=json.load(open(path)); d['tunnel'].update({'id':os.environ['CF_TUNNEL_ID'],'web_host':os.environ['CF_WEB_HOST']})
+open(path,'w').write(json.dumps(d,indent=2)+'\n')
+PY
+  echo "Tunnel siap: https://$web_host/app/"
 }
 
 deploy_worker() {
-  load_cf
-  [ -n "$WEB_HOST" ] || { echo "Configure domain and tunnel first."; return; }
-  [ -d "$WORKER_DIR" ] || { echo "Worker files missing."; return; }
+  local profile token account api_key copies
+  profile=$(choose_profile) || return
   ensure_worker_tools
-
-  local api_key
+  token=$(profile_token "$profile")
+  account=$(profile_account_id "$profile")
   api_key=$(grep '^EMAIL_API_KEY=' "$APP_ENV" | cut -d= -f2-)
-  if [ -z "$api_key" ]; then
-    api_key=$(openssl rand -hex 32)
-    set_app_env EMAIL_API_KEY "$api_key"
-  fi
+  [ -n "$api_key" ] || { api_key=$(openssl rand -hex 32); set_app_env EMAIL_API_KEY "$api_key"; }
+  copies=$(state_get_copy)
+  local web_host
+  web_host=$(state_get tunnel web_host)
+  [ -n "$web_host" ] || { echo "Setup tunnel web dulu."; return; }
   (cd "$WORKER_DIR" && \
-    printf '%s\n' "https://$WEB_HOST" | npx wrangler secret put TEMPMAIL_SERVER_URL && \
+    export CLOUDFLARE_API_TOKEN="$token" CLOUDFLARE_ACCOUNT_ID="$account"; \
+    printf '%s\n' "https://$web_host" | npx wrangler secret put TEMPMAIL_SERVER_URL && \
     printf '%s\n' "$api_key" | npx wrangler secret put TEMPMAIL_API_KEY && \
-    printf '%s\n' "$COPY_DESTINATIONS" | npx wrangler secret put FORWARD_LIST && \
+    printf '%s\n' "$copies" | npx wrangler secret put FORWARD_LIST && \
     npx wrangler deploy)
-  WORKER_DEPLOYED=yes
-  save_cf
-  systemctl restart tempmail
-  echo "Worker deployed. Salinan email: ${COPY_DESTINATIONS:-OFF}"
-}
-
-enable_email_routing() {
-  load_cf
-  [ -n "$EMAIL_DOMAINS" ] || { echo "Configure domain first."; return; }
-  echo "Need API Token: Zone Read, DNS Edit, Email Routing Edit, Workers Scripts Edit."
-  read -r -s -p "Cloudflare API token (not saved): " token; echo
-  [ -n "$token" ] || return
-  read -r -p "WARNING: route ALL *@[$EMAIL_DOMAINS] to Worker tempmail-email-worker? [y/N]: " yes
-  [ "$yes" = y ] || { echo "Cancelled."; return; }
-
-  CF_TOKEN="$token" DOMAINS="$EMAIL_DOMAINS" python3 - <<'PY'
-import json, os
-from urllib.request import Request, urlopen
-
-base = 'https://api.cloudflare.com/client/v4'
-token = os.environ['CF_TOKEN']
-domains = [item.strip() for item in os.environ['DOMAINS'].split(',') if item.strip()]
-def call(method, path, body=None):
-    req = Request(base + path, method=method,
-        data=json.dumps(body).encode() if body is not None else None,
-        headers={'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'})
-    with urlopen(req, timeout=30) as response:
-        data = json.load(response)
-    if not data.get('success'):
-        raise RuntimeError(json.dumps(data.get('errors', data)))
-    return data['result']
-
-body = {'name':'TempMail catch-all', 'enabled':True,
-        'actions':[{'type':'worker', 'value':['tempmail-email-worker']}],
-        'matchers':[{'type':'all'}]}
-for domain in domains:
-    zones = call('GET', '/zones?name=' + domain)
-    if not zones or zones[0].get('status') != 'active':
-        raise SystemExit('Zone missing or not Active: ' + domain)
-    zid = zones[0]['id']
-    try:
-        call('POST', f'/zones/{zid}/email/routing/enable', {})
-    except RuntimeError:
-        pass
-    call('PUT', f'/zones/{zid}/email/routing/rules/catch_all', body)
-    print('Email Routing active: *@' + domain)
+  CF_PROFILE="$profile" python3 - "$STATE" <<'PY'
+import json,os,sys
+path=sys.argv[1]; d=json.load(open(path)); d['profiles'][os.environ['CF_PROFILE']]['worker_deployed']=True
+open(path,'w').write(json.dumps(d,indent=2)+'\n')
 PY
-  EMAIL_ROUTING=yes
-  save_cf
-  [ -n "$COPY_DESTINATIONS" ] && echo "Verify each email tujuan salinan in Cloudflare before using it."
+  echo "Worker profile $profile deployed. Salinan: ${copies:-OFF}"
 }
 
-status() {
-  dashboard
-  [ -n "$WEB_HOST" ] && curl -fsS "https://$WEB_HOST/health" && echo || true
+enable_routing_for_domain() {
+  local domain item profile zid body
+  read -r -p "Domain yang diaktifkan catch-all: " domain
+  item=$(python3 - "$STATE" "$domain" <<'PY'
+import json,sys
+print(json.dumps(json.load(open(sys.argv[1]))['domains'].get(sys.argv[2],{})))
+PY
+)
+  [ "$item" != '{}' ] || { echo "Domain tidak ada di menu domain."; return; }
+  profile=$(printf '%s' "$item" | python3 -c 'import json,sys; print(json.load(sys.stdin)["profile"])')
+  body='{"name":"TempMail catch-all","enabled":true,"actions":[{"type":"worker","value":["tempmail-email-worker"]}],"matchers":[{"type":"all"}]}'
+  zid=$(printf '%s' "$item" | python3 -c 'import json,sys; print(json.load(sys.stdin)["zone_id"])')
+  cf_api "$profile" POST "/zones/$zid/email/routing/enable" '{}' >/dev/null || true
+  cf_api "$profile" PUT "/zones/$zid/email/routing/rules/catch_all" "$body" >/dev/null
+  CF_DOMAIN="$domain" python3 - "$STATE" <<'PY'
+import json,os,sys
+path=sys.argv[1]; d=json.load(open(path)); d['domains'][os.environ['CF_DOMAIN']]['enabled']=True; d['domains'][os.environ['CF_DOMAIN']]['routing']=True
+open(path,'w').write(json.dumps(d,indent=2)+'\n')
+PY
+  refresh_app_domains
+  echo "Routing aktif: *@$domain → Worker profile $profile → TempMail"
+}
+
+dashboard() {
+  local service rss inboxes messages backup tunnel copy domains profiles
+  service=$(systemctl is-active tempmail 2>/dev/null || true)
+  rss=$(ps -o rss= -C tempmail 2>/dev/null | awk 'NR==1 {printf "%.1f MiB",$1/1024}')
+  inboxes=$(sqlite3 "$APP/data/tempmail.db" 'SELECT count(*) FROM inboxes;' 2>/dev/null || echo 0)
+  messages=$(sqlite3 "$APP/data/tempmail.db" 'SELECT count(*) FROM messages;' 2>/dev/null || echo 0)
+  backup=$(systemctl is-active tempmail-backup.timer 2>/dev/null || true)
+  tunnel=$(systemctl is-active cloudflared 2>/dev/null || true)
+  copy=$(state_get_copy); [ -n "$copy" ] || copy=OFF
+  echo '=== TempMail By JhopanStore ==='
+  printf 'Platform        : %s / %s\n' "$(. /etc/os-release; echo "$PRETTY_NAME")" "$(uname -m)"
+  printf 'Service         : %s | %s\n' "${service:-inactive}" "${rss:-0 MiB}"
+  echo 'Web LAN         : http://192.168.11.23:8080/app/'
+  printf 'Inbox           : %s inbox | %s message\n' "$inboxes" "$messages"
+  printf 'SQLite backup   : %s\n' "${backup:-inactive}"
+  echo '--- Cloudflare profiles ---'
+  python3 - "$STATE" <<'PY'
+import json,sys
+d=json.load(open(sys.argv[1])); active=d.get('active_profile','')
+if not d['profiles']: print('Tidak ada akun Cloudflare.')
+for k,v in d['profiles'].items(): print(f"{'*' if k==active else ' '} {k}: {v.get('label',k)} | Worker: {'deployed' if v.get('worker_deployed') else 'belum'}")
+print('Domains:')
+if not d['domains']: print('  belum ada')
+for k,v in sorted(d['domains'].items()): print(f"  {k} | profile={v.get('profile')} | routing={'ON' if v.get('routing') else 'OFF'}")
+t=d['tunnel']; print('Tunnel:', t.get('id') or 'belum dibuat', '| host:', t.get('web_host') or 'belum diatur', '| account:',t.get('account') or 'belum login')
+PY
+  printf 'CF Tunnel      : %s\n' "${tunnel:-not configured}"
+  printf 'Salinan email  : %s\n' "$copy"
 }
 
 full_setup() {
-  configure_domain
-  echo "\nStep 1/5: Wrangler login"
-  wrangler_login
-  echo "\nStep 2/5: Tunnel login"
+  cf_profiles_menu
+  domains_menu
   tunnel_login
-  echo "\nStep 3/5: Create tunnel"
   create_tunnel
-  echo "\nStep 4/5: Deploy Worker"
   deploy_worker
-  echo "\nStep 5/5: Email Routing"
-  enable_email_routing
-  status
+  echo "Pilih menu aktifkan routing untuk setiap domain yang ingin dipakai."
 }
 
 main() {
-  need_root
+  need_root; ensure_state
   while true; do
     dashboard
     echo
-    echo "=== Control Panel ==="
-    echo "1. Login Wrangler Cloudflare"
-    echo "2. Login Cloudflare Tunnel"
-    echo "3. Atur satu/lebih domain TempMail + hostname web"
-    echo "4. Atur tujuan salinan email (default OFF)"
-    echo "5. AUTO SETUP Cloudflare setelah login"
-    echo "6. Deploy/update Email Worker + secret"
-    echo "7. Aktifkan Email Routing catch-all"
-    echo "8. Refresh status"
-    echo "0. Exit"
-    read -r -p "Choose: " choice
+    echo '=== Control Panel ==='
+    echo '1. Kelola akun Cloudflare (CF A / CF B / ...)'
+    echo '2. Kelola domain TempMail (tambah/hapus/aktifkan)'
+    echo '3. Login Wrangler Cloudflare (opsional)'
+    echo '4. Login + setup Cloudflare Tunnel'
+    echo '5. Deploy/update Worker akun aktif'
+    echo '6. Aktifkan Email Routing catch-all per domain'
+    echo '7. Atur tujuan salinan email (default OFF)'
+    echo '8. AUTO SETUP bertahap'
+    echo '9. Refresh status'
+    echo '0. Keluar'
+    read -r -p 'Choose: ' choice
     case "$choice" in
-      1) wrangler_login ;; 2) tunnel_login ;; 3) configure_domain ;;
-      4) manage_copy_destinations ;; 5) full_setup ;; 6) deploy_worker ;;
-      7) enable_email_routing ;; 8) status ;; 0) exit 0 ;; *) echo "Invalid option." ;;
+      1) cf_profiles_menu ;; 2) domains_menu ;; 3) login_wrangler ;;
+      4) tunnel_login; create_tunnel ;; 5) deploy_worker ;;
+      6) enable_routing_for_domain ;; 7) set_copy_destinations ;;
+      8) full_setup ;; 9) : ;; 0) exit 0 ;; *) echo 'Pilihan salah.' ;;
     esac
   done
 }
