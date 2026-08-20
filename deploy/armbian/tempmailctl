@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# TempMail Armbian control panel. Run: sudo tempmailctl
+# TempMail Armbian control panel. Run: menutempmail (or sudo tempmailctl)
 set -euo pipefail
 
 APP=/opt/tempmail
@@ -281,22 +281,19 @@ main() {
     dashboard
     echo
     echo "=== TempMail Armbian Control ==="
-    echo "1. Initial domain/web/Gmail configuration"
-    echo "2. Login Wrangler Cloudflare"
-    echo "3. Show Wrangler login/account"
-    echo "4. Login Cloudflare Tunnel"
-    echo "5. Create Tunnel + web hostname + service"
-    echo "6. Deploy Email Worker + secrets"
-    echo "7. Enable Email Routing catch-all"
-    echo "8. Full setup, step by step"
-    echo "9. Status and health checks"
+    echo "1. Login Wrangler Cloudflare"
+    echo "2. Login Cloudflare Tunnel"
+    echo "3. Atur domain email + web hostname + Gmail backup"
+    echo "4. AUTO SETUP semua setelah login"
+    echo "5. Deploy/update Email Worker + secret"
+    echo "6. Aktifkan Email Routing catch-all"
+    echo "7. Refresh status"
     echo "0. Exit"
     read -r -p "Choose: " choice
     case "$choice" in
-      1) configure_domain ;; 2) wrangler_login ;; 3) wrangler_whoami ;;
-      4) tunnel_login ;; 5) create_tunnel ;; 6) deploy_worker ;;
-      7) enable_email_routing ;; 8) full_setup ;; 9) status ;;
-      0) exit 0 ;; *) echo "Invalid option." ;;
+      1) wrangler_login ;; 2) tunnel_login ;; 3) configure_domain ;;
+      4) full_setup ;; 5) deploy_worker ;; 6) enable_email_routing ;;
+      7) status ;; 0) exit 0 ;; *) echo "Invalid option." ;;
     esac
   done
 }

@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+# Passwordless menu launcher installed by TempMail setup.
+exec sudo /usr/local/sbin/tempmailctl "$@"

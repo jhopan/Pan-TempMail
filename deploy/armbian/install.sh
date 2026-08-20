@@ -21,6 +21,7 @@ id -u "$APP_USER" >/dev/null 2>&1 || useradd --system --home "$ROOT" --shell /us
 install -d -o "$APP_USER" -g "$APP_USER" -m 0750 "$ROOT/data/attachments" "$ROOT/backups" "$ROOT/worker" "$ENV_DIR"
 install -o root -g root -m 0755 "$BINARY" "$ROOT/tempmail"
 install -o root -g root -m 0755 "$SCRIPT_DIR/tempmailctl" /usr/local/sbin/tempmailctl
+install -o root -g root -m 0755 "$SCRIPT_DIR/menutempmail" /usr/local/bin/menutempmail
 install -o root -g root -m 0644 "$SCRIPT_DIR/tempmail.service" /etc/systemd/system/tempmail.service
 install -o root -g root -m 0644 "$SCRIPT_DIR/tempmail-backup.service" /etc/systemd/system/tempmail-backup.service
 install -o root -g root -m 0644 "$SCRIPT_DIR/tempmail-backup.timer" /etc/systemd/system/tempmail-backup.timer
