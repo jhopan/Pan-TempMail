@@ -1,339 +1,202 @@
-# 📧 TempMail Ultra-Light
+# TempMail By JhopanStore
 
-<div align="center">
+Low-resource disposable email platform for manual use and legitimate test/automation workflows.
 
-**Single-binary disposable email platform — ~24MB binary, ~35MB RAM**
-
-[![Go](https://img.shields.io/badge/Go-1.25+-00ADD8?style=flat&logo=go)](https://golang.org/)
-[![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
-
-</div>
-
----
-
-## 🌟 Overview
-
-TempMail Ultra-Light is a production-ready temporary email platform in a **single Go binary**. No Node.js, no PostgreSQL, no Maddy, no Nginx — just one file.
-
-**Key Highlights:**
-- 📦 **Single binary** (~24MB) — everything embedded
-- 💾 **SQLite embedded** — zero database config
-- 📨 **Built-in SMTP** — no external mail server
-- 🎨 **Embedded frontend** — no Node.js runtime
-- ⚡ **~35MB RAM** — runs on the cheapest VPS
-- 🤖 **Automation API** — create inboxes, wait for emails, extract OTPs
-- 🔒 **Secure by default** — no hardcoded secrets, fail-closed auth
-
----
-
-## 🚀 Quick Start
-
-### Option 1: Docker (Recommended)
-
-```bash
-# 1. Generate JWT secret
-echo "JWT_SECRET=$(openssl rand -hex 32)" > .env
-echo "DOMAINS=mail.example.com" >> .env
-
-# 2. Build and run
-docker compose up -d --build
-
-# 3. Check health
-curl http://localhost:8080/health
+```text
+Cloudflare Email Routing → Worker → Cloudflare Tunnel → TempMail → SQLite
 ```
 
-### Option 2: Binary directly
+No public port 25, Maddy, PostgreSQL, Node.js runtime, or Nginx is required in Cloudflare mode.
+
+## Highlights
+
+- Single Go binary: HTTP API, embedded vanilla web UI, direct/local SMTP mode, SQLite.
+- Verified low-resource Armbian deployment: TempMail process around 20MB RSS.
+- Automation API: create inbox, wait for email, inspect message, extract OTP/link.
+- Multiple temp-mail domains in one instance.
+- Domains can originate from multiple Cloudflare account profiles.
+- One Cloudflare Tunnel can route all profile Workers to one TempMail host.
+- Optional email copies: **OFF by default**.
+- Linux menu: `menutempmail`.
+
+## Status
+
+| Component | State |
+|---|---|
+| Go core | Working |
+| Embedded web UI | Working |
+| SQLite/WAL/cleanup | Working |
+| Direct/local SMTP | Working |
+| Cloudflare HTTP receive endpoint | Working; HTTP simulated |
+| Armbian systemd deployment | Verified |
+| Cloudflare multi-profile menu | Implemented; real account setup pending |
+| macOS launchd installer | Not implemented |
+| Windows Service installer | Not implemented |
+| GitHub Release bootstrap | Script exists; release pipeline/assets not published |
+
+## Architecture
+
+```text
+Email to any@domain.example
+        ↓
+Cloudflare Email Routing catch-all
+        ↓
+Worker for that Cloudflare profile
+        ├─ optional copies, only if explicitly configured
+        └─ HTTPS → shared Cloudflare Tunnel
+                       ↓
+             TempMail By JhopanStore
+             HTTP API + web UI + SQLite
+```
+
+The original recipient is preserved. Therefore these are separate inboxes:
+
+```text
+abc@domain.example
+otp@domain.example
+github-test@another-domain.example
+```
+
+## Quick local run
 
 ```bash
-# 1. Build
 cd receiver
-go build -ldflags="-s -w" -o tempmail .
-
-# 2. Configure
 cp ../.env.example .env
-# Edit .env — set JWT_SECRET and DOMAINS
-
-# 3. Run
-./tempmail
+# Set JWT_SECRET and DOMAINS in .env.
+go run .
 ```
 
-### Option 3: From source
+Open:
+
+```text
+http://127.0.0.1:8080/app/
+```
+
+## Verified Linux / Armbian deployment
+
+Read [`docs/ARMBIAN.md`](docs/ARMBIAN.md) and [`docs/RUNBOOK.md`](docs/RUNBOOK.md).
+
+On installed host:
 
 ```bash
-git clone https://github.com/jhopan/TempMailByJhopanstore.git
-cd TempMailByJhopanstore
-cp .env.example .env
-# Edit .env — set JWT_SECRET and DOMAINS
-cd receiver && go run .
+menutempmail
 ```
 
----
+Dashboard shows service health, memory, domains, inbox counts, Cloudflare profiles, tunnel state, Worker/routing status, and optional email copies.
 
-## 📊 Resource Usage
+Current verified host layout:
 
-| Component | Old Version | Ultra-Light |
-|-----------|-------------|-------------|
-| Binary size | N/A (multi-process) | **24MB** |
-| RAM (idle) | ~400-500MB | **~35MB** |
-| RAM (active) | ~600MB+ | **~50MB** |
-| Processes | 4 (Maddy, Go, Next.js, Nginx) | **1** |
-| External deps | PostgreSQL, Node.js, Maddy, Nginx | **None** |
-| Docker image | N/A | **~25MB** (Alpine) |
-
----
-
-## 🏗️ Architecture
-
-```
-┌──────────────────────────────────────────┐
-│         Single Go Binary (~24MB)          │
-│                                          │
-│  ┌──────────┐  ┌────────┐  ┌─────────┐ │
-│  │ SMTP     │  │ HTTP   │  │ Static  │ │
-│  │ Port 25  │  │ API    │  │ Frontend│ │
-│  │          │  │ Port   │  │ (embed) │ │
-│  │ built-in │  │ 8080   │  │         │ │
-│  └────┬─────┘  └───┬────┘  └────┬────┘ │
-│       │            │            │       │
-│       ▼            ▼            ▼       │
-│  ┌────────────────────────────────────┐ │
-│  │     SQLite (embedded file)         │ │
-│  │     data/tempmail.db               │ │
-│  └────────────────────────────────────┘ │
-└──────────────────────────────────────────┘
+```text
+/opt/tempmail/tempmail
+/etc/tempmail/tempmail.env
+/etc/tempmail/cloudflare-state.json
+/opt/tempmail/data/tempmail.db
 ```
 
----
+### Build locally, deploy binary
 
-## 🤖 Automation API
-
-### Create an inbox
+Build on Windows. Do not build on VPS/Armbian:
 
 ```bash
-curl -X POST https://your-instance/api/inbox \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"username": "test123", "domain": "mail.example.com"}'
+cd receiver
+CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags="-s -w" -o tempmail-linux-arm64 .
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o tempmail-linux-amd64 .
 ```
 
-### Wait for an email (blocking — no polling!)
+## Cloudflare menu model
+
+`menutempmail` supports separate account profiles:
+
+```text
+CF A
+└─ domain-a.example → Worker A → shared tunnel → TempMail
+
+CF B
+└─ domain-b.example → Worker B → shared tunnel → TempMail
+```
+
+Recommended order:
+
+```text
+1. Add CF profile A in menu
+2. Add active domain A
+3. Login/create shared Tunnel web hostname
+4. Deploy Worker A
+5. Enable catch-all for domain A
+6. Repeat with profile B/domain B
+```
+
+A domain removal from the menu only removes it from TempMail local configuration. It does not delete Cloudflare DNS, zone, or routing automatically.
+
+## Optional email copies
+
+Default:
+
+```text
+OFF
+```
+
+Without copies:
+
+```text
+anything@domain.example → Worker → TempMail only
+```
+
+Configure copies only from menu when needed. Multiple comma-separated destination addresses are supported. Cloudflare must verify each destination address.
+
+## Automation API
+
+```text
+POST   /api/setup                        bootstrap first admin only
+POST   /api/auth/login                   JWT login
+POST   /api/inbox                        create inbox
+GET    /api/inbox/:email                 list messages
+GET    /api/inbox/:email/wait?timeout=60 wait for message
+GET    /api/message/:id                  message + OTP codes + links
+POST   /api/email/receive                Cloudflare Worker ingestion
+GET    /sse/:email?token=JWT             live updates
+GET    /health                           health check
+```
+
+Example flow:
 
 ```bash
-# Blocks until email arrives, up to 60 seconds
-curl "https://your-instance/api/inbox/test123@mail.example.com/wait?timeout=60" \
-  -H "Authorization: Bearer $TOKEN"
+# Create an address.
+POST /api/inbox
+{"username":"test-123","domain":"domain.example"}
+
+# Trigger a legitimate service/test mail.
+
+# Wait up to 60 seconds; response includes extracted codes/links.
+GET /api/inbox/test-123@domain.example/wait?timeout=60
 ```
 
-Response includes **auto-extracted OTP codes** and **verification links**:
-
-```json
-{
-  "id": 42,
-  "from": "noreply@example.com",
-  "subject": "Your verification code",
-  "codes": ["483920"],
-  "links": ["https://example.com/verify?token=abc123"]
-}
-```
-
-### Full automation example
+## Development
 
 ```bash
-# 1. Login
-TOKEN=$(curl -s -X POST https://your-instance/api/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"email":"admin@example.com","password":"yourpass"}' | jq -r .token)
-
-# 2. Create inbox
-ADDR=$(curl -s -X POST https://your-instance/api/inbox \
-  -H "Authorization: Bearer $TOKEN" \
-  -d '{}' | jq -r .email)
-
-# 3. ... trigger signup that sends email to $ADDR ...
-
-# 4. Wait for email and extract OTP
-OTP=$(curl -s "https://your-instance/api/inbox/$ADDR/wait?timeout=60" \
-  -H "Authorization: Bearer $TOKEN" | jq -r .codes[0])
-
-echo "OTP: $OTP"
+cd receiver
+go test ./...
+go vet ./...
 ```
 
----
+Docs for future development:
 
-## 📖 API Endpoints
+- [`AGENTS.md`](AGENTS.md) — repository rules and agent/developer instructions.
+- [`docs/PRD.md`](docs/PRD.md) — product requirements.
+- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — system design.
+- [`docs/TDD.md`](docs/TDD.md) — test discipline.
+- [`docs/SDD.md`](docs/SDD.md) — spec-driven change process.
+- [`docs/RUNBOOK.md`](docs/RUNBOOK.md) — deploy, operation, test, recovery.
+- [`docs/ARMBIAN.md`](docs/ARMBIAN.md) — Linux/Armbian deployment specifics.
 
-### Authentication
-```
-POST   /api/auth/login              # Login (returns JWT)
-GET    /api/auth/me                 # Current user info
-```
+## Security
 
-### Inbox
-```
-POST   /api/inbox                   # Create inbox (automation)
-GET    /api/inbox/:email            # Get messages (paginated)
-DELETE /api/inbox/:email            # Delete inbox + messages
-GET    /api/inbox/:email/wait       # Wait for message (blocking)
-```
+- `JWT_SECRET` is mandatory; no hardcoded fallback.
+- Worker ingress uses `X-Email-API-Key`.
+- Keep Cloudflare API tokens, Worker secrets, DB, and admin credentials outside Git.
+- Keep port 8080 private/LAN-only unless accessed through Cloudflare Tunnel/Tailscale.
+- Email forwarding/copies are opt-in.
 
-### Messages
-```
-GET    /api/message/:id             # Get message detail + extracted codes/links
-DELETE /api/message/:id             # Delete message
-GET    /api/message/:id/attachments # List attachments
-GET    /api/attachment/:id          # Download attachment
-```
+## License
 
-### Real-time
-```
-GET    /sse/:email?token=JWT        # Server-Sent Events stream
-```
-
-### Admin
-```
-GET    /api/admin/users             # List users
-POST   /api/admin/users             # Create user
-PUT    /api/admin/users/:id         # Update user
-DELETE /api/admin/users/:id         # Delete user
-PUT    /api/admin/users/:id/password # Reset password
-```
-
-### Public
-```
-GET    /health                      # Health check
-GET    /api/config                  # Public config (domains, site name)
-```
-
----
-
-## 🔧 Configuration
-
-All config via environment variables (`.env` file supported):
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `DB_DRIVER` | `sqlite` | `sqlite` or `postgres` |
-| `DB_PATH` | `data/tempmail.db` | SQLite file path |
-| `JWT_SECRET` | **required** | Generate with `openssl rand -hex 32` |
-| `DOMAINS` | `example.com` | Comma-separated mail domains |
-| `SMTP_PORT` | `25` | SMTP listen port |
-| `PORT` | `8080` | HTTP API port |
-| `CORS_ORIGINS` | empty | Comma-separated allowed origins |
-| `CLEANUP_INTERVAL` | `1h` | How often to purge old data |
-| `MESSAGE_RETENTION` | `24h` | How long to keep messages |
-| `WEBHOOK_URL` | empty | URL to POST to on email receipt |
-| `ATTACHMENTS_DIR` | `data/attachments` | Attachment storage path |
-
----
-
-## 🚀 Deployment
-
-### VPS (minimum 512MB RAM)
-
-```bash
-# Build on server
-git clone https://github.com/jhopan/TempMailByJhopanstore.git
-cd TempMailByJhopanstore
-docker compose up -d --build
-```
-
-### Oracle Cloud Free Tier
-
-```bash
-# ARM instance (4 core, 24GB RAM) — way more than enough
-docker compose up -d --build
-```
-
-### Requirements
-
-- **Port 25** must be unblocked (for SMTP reception)
-- **Domain** with MX record pointing to your server
-- **Minimum**: 512MB RAM, 1 CPU, 10GB disk
-
----
-
-## 🔒 Security
-
-- ✅ JWT auth with no fallback secret (fail-closed)
-- ✅ Bcrypt password hashing
-- ✅ Rate limiting (login 5/min, API 60/min, delete 20/min)
-- ✅ Role-based access (admin/user)
-- ✅ Sandboxed email HTML rendering
-- ✅ CORS from environment variable
-- ✅ No hardcoded credentials
-- ✅ Graceful shutdown
-- ✅ SQL injection prevention (parameterized queries)
-
----
-
-## 🛠️ Tech Stack
-
-| Component | Technology |
-|-----------|-----------|
-| Backend | Go 1.25+ (Gin framework) |
-| Database | SQLite (embedded) or PostgreSQL (optional) |
-| SMTP | Built-in (emersion/go-smtp) |
-| Frontend | Vanilla HTML + JS + Tailwind CSS (CDN) |
-| Auth | JWT (golang-jwt/v5) |
-| Container | Docker (Alpine, multi-stage) |
-
----
-
-## 📁 Project Structure
-
-```
-TempMailByJhopanStore/
-├── receiver/              # Go Backend (single binary)
-│   ├── main.go           # Entry point + graceful shutdown
-│   ├── api/              # HTTP routes & SSE
-│   ├── handler/          # Auth handlers
-│   ├── handlers/         # API handlers (inbox, message, etc.)
-│   ├── middleware/       # JWT & admin middleware
-│   ├── models/           # Data models
-│   ├── repository/       # Database operations
-│   ├── database/         # DB connection (SQLite/PostgreSQL)
-│   ├── cleanup/          # Auto-purge expired emails
-│   ├── smtp/             # Built-in SMTP server
-│   ├── parser/           # Email parsing
-│   └── web/              # Embedded static frontend
-│       └── static/       # HTML, JS, CSS files
-├── Dockerfile            # Multi-stage build (~25MB image)
-├── docker-compose.yml    # Single-container deployment
-└── .env.example          # Environment template
-```
-
----
-
-## 🐛 Troubleshooting
-
-### Email not arriving
-
-```bash
-# Check if SMTP is listening
-netstat -tlnp | grep :25
-
-# Check logs
-docker compose logs -f tempmail
-```
-
-### Can't login
-
-```bash
-# Check if JWT_SECRET is set
-grep JWT_SECRET .env
-
-# Generate one if missing
-echo "JWT_SECRET=$(openssl rand -hex 32)" >> .env
-```
-
-### Port 25 blocked
-
-Many VPS providers block port 25. Check:
-```bash
-timeout 5 bash -c 'cat < /dev/null > /dev/tcp/gmail-smtp-in.l.google.com/25' \
-  && echo "port 25 open" || echo "port 25 blocked"
-```
-
----
-
-**Made with ❤️ by JhopanStore**
+MIT. Footer/credit: **TempMail By JhopanStore**.

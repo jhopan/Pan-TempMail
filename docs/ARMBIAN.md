@@ -120,7 +120,6 @@ sudo systemctl start tempmail
 - Cloudflare Worker endpoint requires `X-Email-API-Key`.
 - Replace temporary `local.invalid` in `DOMAINS` before real email routing.
 - Do not publish admin credentials in shell history, Git, or chat.
-```
 
 ## Current Armbian target
 
