@@ -50,7 +50,7 @@ Right: add profile → add one domain → deploy Worker for profile → route on
 |---|---|
 | Go | `go test ./...`, `go vet ./...`, build target architecture |
 | Worker | `node --check cloudflare-worker/src/index.js` |
-| Shell menu | `bash -n deploy/armbian/tempmailctl` |
+| Shell menu | `bash -n deploy/linux/tempmailctl` |
 | Armbian deployment | service active, `/health`, UI HTTP 200 |
 | Mail ingestion | local SMTP or HTTP Worker simulation, then actual domain test |
 | Cloudflare routing | explicit test recipient per domain/profile |

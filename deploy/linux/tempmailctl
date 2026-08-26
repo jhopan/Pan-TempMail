@@ -7,10 +7,16 @@ ENV_DIR=/etc/tempmail
 APP_ENV=$ENV_DIR/tempmail.env
 STATE=$ENV_DIR/cloudflare-state.json
 WORKER_DIR=$APP/worker
-TUNNEL_NAME=tempmail-jhopanstore
+TUNNEL_NAME=tempmailbyjhopanstore
 
 need_root() {
   [ "$(id -u)" = 0 ] || { echo "Run: menutempmail"; exit 1; }
+}
+
+app_port() {
+  local p
+  p=$(grep '^PORT=' "$APP_ENV" 2>/dev/null | cut -d= -f2)
+  echo "${p:-8080}"
 }
 
 ensure_state() {
@@ -281,15 +287,123 @@ print(json.load(open(sys.argv[1])).get('copy_destinations',''))
 PY
 }
 
+# Login headless dengan fallback paste-link (sama seperti setup.sh):
+# proses login jalan di background, user buka link di browser PC, klik Allow,
+# browser gagal load (ERR_CONNECTION_REFUSED) -> copy URL address bar -> paste di sini.
+run_login() {
+  # Headless OAuth via --device flag (RFC 8628): user cukup buka URL + masukkan kode.
+  # Tidak pakai localhost callback sama sekali - cocok untuk SSH/headless.
+  local label=$1; shift
+  local logf url code pid
+
+  logf=$(mktemp)
+  "$@" >"$logf" 2>&1 &
+  pid=$!
+
+  # Tunggu URL + kode device flow muncul (max 15s)
+  url=""; code=""
+  for _ in $(seq 1 15); do
+    url=$(grep -oE 'https://dash\.cloudflare\.com/oauth2/device/verify[^ "]*' "$logf" | head -1 || true)
+    code=$(grep -oE 'and enter the code:' "$logf" | head -1 || true)
+    [ -n "$url" ] && break
+    sleep 1
+  done
+
+  # Fallback: URL biasa (bukan device flow)
+  if [ -z "$url" ]; then
+    url=$(grep -oE 'https://dash\.cloudflare\.com/[^ "]+' "$logf" | head -1 || true)
+  fi
+
+  if [ -z "$url" ]; then
+    echo "URL login tidak muncul. Output:"
+    cat "$logf"
+    wait "$pid" 2>/dev/null || true
+    rm -f "$logf"
+    return 1
+  fi
+
+  echo
+  echo "===== LOGIN $label ====="
+  echo "Buka URL ini di browser (HP/laptop manapun):"
+  echo
+  echo "  $url"
+  echo
+  # Tampilkan kode dari output wrangler
+  device_code=$(grep -A2 'enter the code' "$logf" | grep -oE '[A-Za-z0-9]{8}' | head -1 || true)
+  if [ -n "$device_code" ]; then
+    echo "Masukkan kode ini di halaman browser:"
+    echo
+    echo "  $device_code"
+    echo
+  fi
+  echo "Klik Continue / Authorize di browser."
+  echo "Setelah selesai, TEKAN ENTER di sini."
+  echo
+  read -r -p "Sudah authorize? Tekan ENTER untuk lanjut..." _
+
+  wait "$pid" 2>/dev/null || true
+  rm -f "$logf"
+  return 0
+}
+
+wrangler_logged_in() {
+  # wrangler whoami always exits 0; must grep output
+  (cd "$WORKER_DIR" && npx wrangler whoami 2>&1) | grep -q "You are logged in"
+}
+
+logout_wrangler() {
+  read -r -p "Hapus credential Wrangler? (y/N): " c
+  [ "$c" = y ] || { echo "Batal."; return; }
+  rm -rf /root/.wrangler /root/.config/.wrangler /root/.config/wrangler \
+         /root/.npm/_npx /tmp/wrangler-* 2>/dev/null || true
+  echo "Wrangler credential dihapus."
+}
+
+logout_tunnel() {
+  read -r -p "Hapus credential CF Tunnel (cert.pem + semua credential tunnel)? (y/N): " c
+  [ "$c" = y ] || { echo "Batal."; return; }
+  systemctl stop cloudflared 2>/dev/null || true
+  systemctl disable cloudflared 2>/dev/null || true
+  cloudflared service uninstall 2>/dev/null || true
+  rm -rf /root/.cloudflared /etc/cloudflared
+  echo "CF Tunnel credential + service dihapus."
+}
+
+reset_all() {
+  echo "PERINGATAN: Ini akan menghapus SEMUA credential dan state Cloudflare."
+  echo "Service TempMail tetap jalan, data email tidak terhapus."
+  read -r -p "Ketik RESET untuk konfirmasi: " c
+  [ "$c" = "RESET" ] || { echo "Batal."; return; }
+  logout_wrangler
+  logout_tunnel
+  rm -f "$STATE"
+  echo '{}' > "$STATE"
+  echo "Reset selesai. Jalankan menu 8 untuk setup ulang."
+}
+
+
 login_wrangler() {
   ensure_worker_tools
-  echo "Wrangler login hanya convenience. Deploy multi-akun memakai API Token profile aktif."
-  (cd "$WORKER_DIR" && npx wrangler login)
+  if wrangler_logged_in; then
+    echo "Wrangler sudah login."
+    return
+  fi
+  run_login "Wrangler" bash -c "cd '$WORKER_DIR' && npx wrangler login --browser=false --device"
+  if wrangler_logged_in; then
+    echo "Wrangler login OK."
+  else
+    echo "Wrangler belum login. Coba lagi (menu 3)."
+  fi
 }
 
 tunnel_login() {
   echo "Tunnel hanya satu gateway. Login ke akun yang memiliki tunnel utama."
-  cloudflared tunnel login
+  if [ -f /root/.cloudflared/cert.pem ]; then
+    echo "Sudah login (cert.pem ada). Skip."
+  else
+    run_login "CF Tunnel" cloudflared tunnel login
+    [ -f /root/.cloudflared/cert.pem ] && echo "CF Tunnel login OK." || echo "cert.pem belum ada. Coba lagi."
+  fi
   read -r -p "Label akun tunnel (contoh: CF A): " account
   CF_TUNNEL_ACCOUNT="${account:-logged in}" python3 - "$STATE" <<'PY'
 import json,os,sys
@@ -299,21 +413,23 @@ PY
 }
 
 create_tunnel() {
-  local web_host list id
+  local web_host list id tunnel_name
   read -r -p "Hostname web tunnel (contoh: mail.domain.com): " web_host
   [ -n "$web_host" ] || return
+  read -r -p "Nama tunnel [$TUNNEL_NAME]: " tunnel_name
+  tunnel_name=${tunnel_name:-$TUNNEL_NAME}
   [ -f /root/.cloudflared/cert.pem ] || { echo "Login Tunnel dulu."; return; }
   list=$(cloudflared tunnel list --output json)
-  id=$(python3 - "$TUNNEL_NAME" "$list" <<'PY'
+  id=$(python3 - "$tunnel_name" "$list" <<'PY'
 import json,sys
 for item in json.loads(sys.argv[2]):
   if item['name']==sys.argv[1]: print(item['id']); break
 PY
 )
   if [ -z "$id" ]; then
-    cloudflared tunnel create "$TUNNEL_NAME"
+    cloudflared tunnel create "$tunnel_name"
     list=$(cloudflared tunnel list --output json)
-    id=$(python3 - "$TUNNEL_NAME" "$list" <<'PY'
+    id=$(python3 - "$tunnel_name" "$list" <<'PY'
 import json,sys
 for item in json.loads(sys.argv[2]):
   if item['name']==sys.argv[1]: print(item['id']); break
@@ -326,16 +442,16 @@ PY
  credentials-file: /root/.cloudflared/$id.json
  ingress:
    - hostname: $web_host
-     service: http://127.0.0.1:8080
+     service: http://127.0.0.1:$(app_port)
    - service: http_status:404
 EOF
   sed -i 's/^ //' /etc/cloudflared/config.yml
-  cloudflared tunnel route dns "$TUNNEL_NAME" "$web_host"
+  cloudflared tunnel route dns "$tunnel_name" "$web_host"
   cloudflared service install
   systemctl enable --now cloudflared
-  CF_TUNNEL_ID="$id" CF_WEB_HOST="$web_host" python3 - "$STATE" <<'PY'
+  CF_TUNNEL_ID="$id" CF_TUNNEL_NAME="$tunnel_name" CF_WEB_HOST="$web_host" python3 - "$STATE" <<'PY'
 import json,os,sys
-path=sys.argv[1]; d=json.load(open(path)); d['tunnel'].update({'id':os.environ['CF_TUNNEL_ID'],'web_host':os.environ['CF_WEB_HOST']})
+path=sys.argv[1]; d=json.load(open(path)); d['tunnel'].update({'id':os.environ['CF_TUNNEL_ID'],'name':os.environ['CF_TUNNEL_NAME'],'web_host':os.environ['CF_WEB_HOST']})
 open(path,'w').write(json.dumps(d,indent=2)+'\n')
 PY
   echo "Tunnel siap: https://$web_host/app/"
@@ -377,7 +493,7 @@ PY
 )
   [ "$item" != '{}' ] || { echo "Domain tidak ada di menu domain."; return; }
   profile=$(printf '%s' "$item" | python3 -c 'import json,sys; print(json.load(sys.stdin)["profile"])')
-  body='{"name":"TempMail catch-all","enabled":true,"actions":[{"type":"worker","value":["tempmail-email-worker"]}],"matchers":[{"type":"all"}]}'
+  body='{"name":"TempMail catch-all","enabled":true,"actions":[{"type":"worker","value":["tempmailbyjhopanstore"]}],"matchers":[{"type":"all"}]}'
   zid=$(printf '%s' "$item" | python3 -c 'import json,sys; print(json.load(sys.stdin)["zone_id"])')
   cf_api "$profile" POST "/zones/$zid/email/routing/enable" '{}' >/dev/null || true
   cf_api "$profile" PUT "/zones/$zid/email/routing/rules/catch_all" "$body" >/dev/null
@@ -400,9 +516,10 @@ dashboard() {
   tunnel=$(systemctl is-active cloudflared 2>/dev/null || true)
   copy=$(state_get_copy); [ -n "$copy" ] || copy=OFF
   echo '=== TempMail By JhopanStore ==='
+  echo '        Credit JhopanStore'
   printf 'Platform        : %s / %s\n' "$(. /etc/os-release; echo "$PRETTY_NAME")" "$(uname -m)"
   printf 'Service         : %s | %s\n' "${service:-inactive}" "${rss:-0 MiB}"
-  echo 'Web LAN         : http://192.168.11.23:8080/app/'
+  printf 'Web LAN         : http://%s:%s/app/\n' "$(hostname -I | awk '{print $1}')" "$(app_port)"
   printf 'Inbox           : %s inbox | %s message\n' "$inboxes" "$messages"
   printf 'SQLite backup   : %s\n' "${backup:-inactive}"
   echo '--- Cloudflare profiles ---'
@@ -429,6 +546,12 @@ full_setup() {
   echo "Pilih menu aktifkan routing untuk setiap domain yang ingin dipakai."
 }
 
+guided_setup() {
+  local script=/opt/tempmail/setup.sh
+  [ -f "$script" ] || { echo "setup.sh tidak ditemukan di $script"; return; }
+  bash "$script"
+}
+
 main() {
   need_root; ensure_state
   while true; do
@@ -437,20 +560,30 @@ main() {
     echo '=== Control Panel ==='
     echo '1. Kelola akun Cloudflare (CF A / CF B / ...)'
     echo '2. Kelola domain TempMail (tambah/hapus/aktifkan)'
-    echo '3. Login Wrangler Cloudflare (opsional)'
+    echo '3. Login Wrangler Cloudflare'
     echo '4. Login + setup Cloudflare Tunnel'
     echo '5. Deploy/update Worker akun aktif'
     echo '6. Aktifkan Email Routing catch-all per domain'
     echo '7. Atur tujuan salinan email (default OFF)'
-    echo '8. AUTO SETUP bertahap'
-    echo '9. Refresh status'
+    echo '8. SETUP GUIDED sekali jalan (login wrangler + tunnel + worker + routing)'
+    echo '9. AUTO SETUP bertahap (manual per langkah)'
+    echo '---'
+    echo 'L1. Logout Wrangler (hapus credential)'
+    echo 'L2. Logout CF Tunnel (hapus cert + service)'
+    echo 'L3. RESET SEMUA credential Cloudflare'
+    echo '---'
+    echo '10. Refresh status'
     echo '0. Keluar'
     read -r -p 'Choose: ' choice
     case "$choice" in
       1) cf_profiles_menu ;; 2) domains_menu ;; 3) login_wrangler ;;
       4) tunnel_login; create_tunnel ;; 5) deploy_worker ;;
       6) enable_routing_for_domain ;; 7) set_copy_destinations ;;
-      8) full_setup ;; 9) : ;; 0) exit 0 ;; *) echo 'Pilihan salah.' ;;
+      8) guided_setup ;; 9) full_setup ;;
+      L1|l1) logout_wrangler ;;
+      L2|l2) logout_tunnel ;;
+      L3|l3) reset_all ;;
+      10) : ;; 0) exit 0 ;; *) echo 'Pilihan salah.' ;;
     esac
   done
 }

@@ -1,12 +1,10 @@
-name = "tempmail-email-worker"
+name = "tempmailbyjhopanstore"
 main = "src/index.js"
 compatibility_date = "2024-01-01"
+workers_dev = false
+preview_urls = false
 
-# Environment variables — set via:
-#   npx wrangler secret put TEMPMAIL_SERVER_URL
-#   npx wrangler secret put TEMPMAIL_API_KEY
-# Or via Cloudflare Dashboard → Workers → Settings → Variables
-[vars]
-TEMPMAIL_SERVER_URL = "https://your-vps.com"
-TEMPMAIL_API_KEY = ""
-FORWARD_LIST = ""
+# Secrets set via wrangler secret put (not stored here):
+#   TEMPMAIL_SERVER_URL  — tunnel URL, e.g. https://tempmail.yourdomain.com
+#   TEMPMAIL_API_KEY     — matches EMAIL_API_KEY in tempmail.env
+#   FORWARD_LIST         — optional comma-separated forward addresses

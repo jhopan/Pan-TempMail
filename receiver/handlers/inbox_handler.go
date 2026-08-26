@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"receiver/database"
+	"receiver/naming"
 	"receiver/repository"
 
 	"github.com/gin-gonic/gin"
@@ -47,7 +48,25 @@ func CreateInboxAPI(c *gin.Context) {
 	// If email not provided, generate from username + domain
 	if req.Email == "" {
 		if req.Username == "" {
-			req.Username = randomString(8)
+			// No username either: generate from configurable naming rules
+			rules, err := naming.Parse(repository.GetSetting(database.Conn(), "naming_rules"))
+			if err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid naming rules: " + err.Error()})
+				return
+			}
+			if req.Domain == "" {
+				domains := strings.Split(os.Getenv("DOMAINS"), ",")
+				if len(domains) == 0 || strings.TrimSpace(domains[0]) == "" {
+					c.JSON(http.StatusBadRequest, gin.H{"error": "No domain configured"})
+					return
+				}
+				req.Domain = strings.TrimSpace(domains[0])
+			}
+			domain := req.Domain
+			req.Username = rules.GenerateUnique(func(addr string) bool {
+				_, err := repository.GetInboxID(database.Conn(), addr+"@"+domain)
+				return err == nil
+			})
 		}
 		if req.Domain == "" {
 			// Pick first domain from DOMAINS env
@@ -76,11 +95,11 @@ func CreateInboxAPI(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusCreated, gin.H{
-		"email":     req.Email,
-		"inbox_id":  inboxID,
-		"expires":   "24h",
-		"wait_url":  "/inbox/" + req.Email + "/wait",
-		"sse_url":   "/sse/" + req.Email + "?token=<JWT>",
+		"email":    req.Email,
+		"inbox_id": inboxID,
+		"expires":  "24h",
+		"wait_url": "/inbox/" + req.Email + "/wait",
+		"sse_url":  "/sse/" + req.Email + "?token=<JWT>",
 	})
 }
 
@@ -118,13 +137,13 @@ func WaitForMessage(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"id":         msg.ID,
-		"from":       msg.Sender,
-		"subject":    msg.Subject,
-		"text_body":  msg.TextBody,
-		"html_body":  msg.HtmlBody,
-		"codes":      parseCodesArray(msg.Codes),
-		"links":      parseLinksArray(msg.Links),
+		"id":          msg.ID,
+		"from":        msg.Sender,
+		"subject":     msg.Subject,
+		"text_body":   msg.TextBody,
+		"html_body":   msg.HtmlBody,
+		"codes":       parseCodesArray(msg.Codes),
+		"links":       parseLinksArray(msg.Links),
 		"received_at": time.Now().UTC().Format(time.RFC3339),
 	})
 }
@@ -214,8 +233,8 @@ func GetAttachment(c *gin.Context) {
 // Health returns a simple health check response.
 func Health(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
-		"status":     "ok",
-		"timestamp":  time.Now().UTC().Format(time.RFC3339),
+		"status":    "ok",
+		"timestamp": time.Now().UTC().Format(time.RFC3339),
 	})
 }
 
@@ -261,16 +280,6 @@ func SeedAdmin(c *gin.Context) {
 		"user":    user,
 		"hint":    "Now login via POST /api/auth/login",
 	})
-}
-
-func randomString(length int) string {
-	const charset = "abcdefghijklmnopqrstuvwxyz0123456789"
-	sb := make([]byte, length)
-	for i := range sb {
-		sb[i] = charset[time.Now().UnixNano()%int64(len(charset))]
-		time.Sleep(time.Nanosecond) // ensure different seeds
-	}
-	return string(sb)
 }
 
 // parseCodesArray parses a JSON array string into a string slice.

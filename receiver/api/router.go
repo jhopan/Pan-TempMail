@@ -216,6 +216,10 @@ func SetupRouter() *gin.Engine {
 		admin.PUT("/users/:id", authHandler.UpdateUser)
 		admin.PUT("/users/:id/password", authHandler.UpdatePassword)
 		admin.DELETE("/users/:id", authHandler.DeleteUser)
+
+		// Naming rules for auto-generated inbox addresses
+		admin.GET("/naming-rules", handlers.GetNamingRules)
+		admin.PUT("/naming-rules", handlers.UpdateNamingRules)
 	}
 
 	// Protected API routes (require authentication)

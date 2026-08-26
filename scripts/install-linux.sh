@@ -56,7 +56,7 @@ src=$(find "$work" -maxdepth 1 -type d -name 'TempMailByJhopanstore-*' | head -1
 
 cp "$work/tempmail" "$src/receiver/$ASSET"
 chmod 755 "$src/receiver/$ASSET"
-cd "$src/deploy/armbian"
+cd "$src/deploy/linux"
 ./install.sh "../../receiver/$ASSET"
 
 echo "Installed TempMail release $tag"

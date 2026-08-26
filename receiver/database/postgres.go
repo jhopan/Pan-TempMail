@@ -130,6 +130,10 @@ func migrate(db *sql.DB) error {
 			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 			updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 		)`,
+		`CREATE TABLE IF NOT EXISTS settings (
+			key TEXT PRIMARY KEY,
+			value TEXT NOT NULL
+		)`,
 		// Index for fast inbox lookups
 		`CREATE INDEX IF NOT EXISTS idx_messages_inbox_id ON messages(inbox_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_messages_received_at ON messages(received_at DESC)`,

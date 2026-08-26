@@ -156,6 +156,8 @@ GET    /api/message/:id                  message + OTP codes + links
 POST   /api/email/receive                Cloudflare Worker ingestion
 GET    /sse/:email?token=JWT             live updates
 GET    /health                           health check
+GET    /api/admin/naming-rules           naming rules for auto-generated inboxes
+PUT    /api/admin/naming-rules           update naming rules (admin JWT)
 ```
 
 Example flow:

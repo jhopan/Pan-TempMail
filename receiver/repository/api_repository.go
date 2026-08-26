@@ -37,11 +37,11 @@ type PaginatedResult[T any] struct {
 }
 
 type MessageListItem struct {
-	ID         int    `json:"id"`
-	Sender     string `json:"sender"`
-	Subject    string `json:"subject"`
-	ReceivedAt string `json:"received_at"`
-	HasAttachment bool `json:"has_attachment"`
+	ID            int    `json:"id"`
+	Sender        string `json:"sender"`
+	Subject       string `json:"subject"`
+	ReceivedAt    string `json:"received_at"`
+	HasAttachment bool   `json:"has_attachment"`
 }
 
 type MessageDetail struct {
@@ -156,7 +156,9 @@ func WaitForMessage(db *sql.DB, email string, timeout time.Duration, matchSubjec
 			FROM messages
 			WHERE inbox_id = (SELECT id FROM inboxes WHERE email = $1)
 			AND received_at >= $2`
-		args := []interface{}{email, time.Now().Add(-timeout)}
+		// SQLite stores received_at as CURRENT_TIMESTAMP (UTC, "2006-01-02 15:04:05").
+		// Pass cutoff in the same format so string comparison works.
+		args := []interface{}{email, time.Now().UTC().Add(-timeout).Format("2006-01-02 15:04:05")}
 		if matchSubject != "" {
 			query += " AND subject LIKE $3"
 			args = append(args, "%"+matchSubject+"%")

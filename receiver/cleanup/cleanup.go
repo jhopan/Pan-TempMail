@@ -59,7 +59,8 @@ func purgeExpired(db *sql.DB, retention time.Duration) {
 	}
 
 	// 2. Delete old messages past retention period (even if inbox not expired)
-	cutoff := time.Now().Add(-retention)
+	// Format cutoff like SQLite CURRENT_TIMESTAMP (UTC, no T separator) so comparison works.
+	cutoff := time.Now().UTC().Add(-retention).Format("2006-01-02 15:04:05")
 	res, err = db.ExecContext(ctx, `DELETE FROM messages WHERE received_at < ?`, cutoff)
 	if err != nil {
 		log.Printf("cleanup: purge old messages: %v", err)
