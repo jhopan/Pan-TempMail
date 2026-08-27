@@ -106,19 +106,41 @@ function changeEmail() {
   startCooldown(60);
 }
 
-function randomEmail() {
+async function randomEmail() {
   if (cooldown > 0) return;
-  const r = Math.random().toString(36).substring(2, 10);
-  document.getElementById('username').value = r;
   const domain = document.getElementById('domain').value;
-  currentEmail = r + '@' + domain;
-  localStorage.setItem('email_user', r);
-  updateEmailDisplay();
-  selectedMsg = null;
-  renderMessage();
-  loadInbox();
-  reconnectSSE();
-  startCooldown(60);
+  // Call API to generate email using server-side naming rules
+  const res = await API.request('/api/inbox', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ domain })
+  });
+  if (res && res.ok) {
+    const data = await res.json();
+    const parts = data.email.split('@');
+    document.getElementById('username').value = parts[0];
+    currentEmail = data.email;
+    localStorage.setItem('email_user', parts[0]);
+    localStorage.setItem('email_domain', parts[1] || domain);
+    updateEmailDisplay();
+    selectedMsg = null;
+    renderMessage();
+    loadInbox();
+    reconnectSSE();
+    startCooldown(60);
+  } else {
+    // Fallback: client-side random
+    const r = Math.random().toString(36).substring(2, 10);
+    document.getElementById('username').value = r;
+    currentEmail = r + '@' + domain;
+    localStorage.setItem('email_user', r);
+    updateEmailDisplay();
+    selectedMsg = null;
+    renderMessage();
+    loadInbox();
+    reconnectSSE();
+    startCooldown(60);
+  }
 }
 
 function copyEmail() {

@@ -11,28 +11,15 @@ No public port 25, Maddy, PostgreSQL, Node.js runtime, or Nginx is required in C
 ## Highlights
 
 - Single Go binary: HTTP API, embedded vanilla web UI, direct/local SMTP mode, SQLite.
-- Verified low-resource Armbian deployment: TempMail process around 20MB RSS.
-- Automation API: create inbox, wait for email, inspect message, extract OTP/link.
+- Verified low-resource Debian deployment: TempMail process around 20MB RSS.
+- Automation API with API key auth: create inbox, wait for email, extract OTP/link.
+- Guest mode UI: auto-generate email on page load, no login required.
+- Configurable naming rules: human-like Indonesian names (e.g. `langitbiru42`, `senjaindah17`), editable at runtime via admin API.
 - Multiple temp-mail domains in one instance.
 - Domains can originate from multiple Cloudflare account profiles.
 - One Cloudflare Tunnel can route all profile Workers to one TempMail host.
 - Optional email copies: **OFF by default**.
 - Linux menu: `menutempmail`.
-
-## Status
-
-| Component | State |
-|---|---|
-| Go core | Working |
-| Embedded web UI | Working |
-| SQLite/WAL/cleanup | Working |
-| Direct/local SMTP | Working |
-| Cloudflare HTTP receive endpoint | Working; HTTP simulated |
-| Armbian systemd deployment | Verified |
-| Cloudflare multi-profile menu | Implemented; real account setup pending |
-| macOS launchd installer | Not implemented |
-| Windows Service installer | Not implemented |
-| GitHub Release bootstrap | Script exists; release pipeline/assets not published |
 
 ## Architecture
 
@@ -49,129 +36,252 @@ Worker for that Cloudflare profile
              HTTP API + web UI + SQLite
 ```
 
-The original recipient is preserved. Therefore these are separate inboxes:
-
-```text
-abc@domain.example
-otp@domain.example
-github-test@another-domain.example
-```
-
 ## Quick local run
 
 ```bash
 cd receiver
 cp ../.env.example .env
-# Set JWT_SECRET and DOMAINS in .env.
+# Set JWT_SECRET, EMAIL_API_KEY, and DOMAINS in .env.
 go run .
 ```
 
-Open:
+Open: `http://127.0.0.1:8080/app/`
 
-```text
-http://127.0.0.1:8080/app/
-```
+## Linux deployment
 
-## Verified Linux / Armbian deployment
+### Prerequisites
 
-Read [`docs/ARMBIAN.md`](docs/ARMBIAN.md) and [`docs/RUNBOOK.md`](docs/RUNBOOK.md).
+- Debian/Ubuntu/Armbian x86_64 or arm64
+- Root access
+- Domain on Cloudflare (nameservers pointing to CF)
 
-On installed host:
+### Setup
 
 ```bash
+# On the target host after clone:
+sudo bash deploy/linux/install.sh
+
+# Then run guided setup (interactive):
 menutempmail
+# Choose option 8 — SETUP GUIDED
 ```
 
-Dashboard shows service health, memory, domains, inbox counts, Cloudflare profiles, tunnel state, Worker/routing status, and optional email copies.
-
-Current verified host layout:
-
-```text
-/opt/tempmail/tempmail
-/etc/tempmail/tempmail.env
-/etc/tempmail/cloudflare-state.json
-/opt/tempmail/data/tempmail.db
-```
+Guided setup flow:
+1. Install dependencies (node, cloudflared, wrangler)
+2. Login Wrangler (device auth — buka URL + masukkan kode)
+3. Login Cloudflare Tunnel (pilih zona → cert.pem otomatis)
+4. Buat tunnel + DNS route (tanya nama tunnel, default: `tempmailbyjhopanstore`)
+5. Deploy worker `tempmailbyjhopanstore` + set secrets
+6. Aktifkan Email Routing + catch-all
+7. Simpan state + verify
 
 ### Build locally, deploy binary
 
-Build on Windows. Do not build on VPS/Armbian:
+Build on Windows (cross-compile), do not build on VPS:
 
 ```bash
 cd receiver
-CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags="-s -w" -o tempmail-linux-arm64 .
 CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o tempmail-linux-amd64 .
 ```
 
-## Cloudflare menu model
-
-`menutempmail` supports separate account profiles:
+### Host layout
 
 ```text
-CF A
-└─ domain-a.example → Worker A → shared tunnel → TempMail
-
-CF B
-└─ domain-b.example → Worker B → shared tunnel → TempMail
+/opt/tempmail/tempmail              Go binary
+/opt/tempmail/worker/               Wrangler project (wrangler.toml + src/)
+/etc/tempmail/tempmail.env          App config (PORT, DOMAINS, secrets)
+/etc/tempmail/cloudflare-state.json CF state (tunnel, worker, domains)
+/opt/tempmail/data/tempmail.db      SQLite database
+/usr/local/sbin/tempmailctl         Control panel binary
+/usr/local/bin/menutempmail         Menu launcher
 ```
-
-Recommended order:
-
-```text
-1. Add CF profile A in menu
-2. Add active domain A
-3. Login/create shared Tunnel web hostname
-4. Deploy Worker A
-5. Enable catch-all for domain A
-6. Repeat with profile B/domain B
-```
-
-A domain removal from the menu only removes it from TempMail local configuration. It does not delete Cloudflare DNS, zone, or routing automatically.
-
-## Optional email copies
-
-Default:
-
-```text
-OFF
-```
-
-Without copies:
-
-```text
-anything@domain.example → Worker → TempMail only
-```
-
-Configure copies only from menu when needed. Multiple comma-separated destination addresses are supported. Cloudflare must verify each destination address.
 
 ## Automation API
 
-```text
-POST   /api/setup                        bootstrap first admin only
-POST   /api/auth/login                   JWT login
-POST   /api/inbox                        create inbox
-GET    /api/inbox/:email                 list messages
-GET    /api/inbox/:email/wait?timeout=60 wait for message
-GET    /api/message/:id                  message + OTP codes + links
-POST   /api/email/receive                Cloudflare Worker ingestion
-GET    /sse/:email?token=JWT             live updates
-GET    /health                           health check
-GET    /api/admin/naming-rules           naming rules for auto-generated inboxes
-PUT    /api/admin/naming-rules           update naming rules (admin JWT)
-```
+All endpoints (except `/api/auth/login` and `/api/setup`) accept `X-Email-API-Key` header for automation. No JWT login required.
 
-Example flow:
+### Endpoints
+
+| Endpoint | Method | Auth | Description |
+|---|---|---|---|
+| `/api/config` | GET | none | Domains + API key (for frontend) |
+| `/api/inbox` | POST | API key | Create inbox (auto-generate name from rules) |
+| `/api/inbox/{email}` | GET | API key | List messages in inbox |
+| `/api/inbox/{email}/wait` | GET | API key | Block until email arrives (returns message + codes + links) |
+| `/api/message/{id}` | GET | API key | Message detail (subject, body, codes, links) |
+| `/api/message/{id}` | DELETE | API key | Delete message |
+| `/api/message/{id}/attachments` | GET | API key | List attachments |
+| `/api/attachment/{id}` | GET | API key | Download attachment |
+| `/api/inbox/{email}` | DELETE | API key | Delete all messages in inbox |
+| `/api/email/receive` | POST | API key | Worker ingestion (raw RFC822 email) |
+| `/sse/{email}` | GET | JWT or api_key | Server-Sent Events (live inbox updates) |
+| `/health` | GET | none | Health check |
+| `/api/auth/login` | POST | none | JWT login (for admin panel) |
+| `/api/setup` | POST | none | Bootstrap first admin user |
+| `/api/admin/naming-rules` | GET | JWT admin | View naming rules |
+| `/api/admin/naming-rules` | PUT | JWT admin | Update naming rules |
+
+### Example: Full automation flow
 
 ```bash
-# Create an address.
-POST /api/inbox
-{"username":"test-123","domain":"domain.example"}
+API_KEY="your-api-key"
+BASE="https://your-domain.com"
 
-# Trigger a legitimate service/test mail.
+# 1. Create inbox (name auto-generated from naming rules)
+curl -s -X POST "$BASE/api/inbox" \
+  -H "Content-Type: application/json" \
+  -H "X-Email-API-Key: $API_KEY" \
+  -d '{"domain":"your-domain.com"}'
+# → {"email":"langitbiru42@your-domain.com","expires":"24h",...}
 
-# Wait up to 60 seconds; response includes extracted codes/links.
-GET /api/inbox/test-123@domain.example/wait?timeout=60
+# 2. Register on target site using this email
+#    (site sends verification email)
+
+# 3. Wait for email (blocking — auto-returns when email arrives)
+curl -s "$BASE/api/inbox/langitbiru42@your-domain.com/wait" \
+  -H "X-Email-API-Key: $API_KEY"
+# → {"id":7,"codes":["284716"],"links":["https://verify.example.com/token=xyz"],...}
+
+# 4. Extract OTP and verification link from response
+#    codes[0] = "284716"
+#    links[0] = "https://verify.example.com/token=xyz"
 ```
+
+### Python example
+
+```python
+import requests
+
+BASE = "https://your-domain.com"
+HEADERS = {"X-Email-API-Key": "your-api-key"}
+
+# 1. Create inbox
+r = requests.post(f"{BASE}/api/inbox", headers=HEADERS,
+                   json={"domain": "your-domain.com"})
+email = r.json()["email"]
+
+# 2. Register on target site with this email
+# ... (your registration code here) ...
+
+# 3. Wait for email
+r = requests.get(f"{BASE}/api/inbox/{email}/wait",
+                 headers=HEADERS, timeout=60)
+msg = r.json()
+
+# 4. Extract OTP and link
+otp = msg["codes"][0] if msg.get("codes") else None
+link = msg["links"][0] if msg.get("links") else None
+print(f"OTP: {otp}, Link: {link}")
+```
+
+## Naming rules
+
+Inbox addresses are generated from configurable rules stored in the database (settings table, key `naming_rules`).
+
+Default template: `{first}{sep}{second}{num}`
+
+Example output: `langitbiru42`, `senjaindah17`, `bimautama63`
+
+### Tokens
+
+| Token | Description |
+|---|---|
+| `{first}` | Random word from `first_words` list |
+| `{second}` | Random word from `second_words` list |
+| `{sep}` | Separator (default: empty) |
+| `{num}` | Random number (80% probability, range 10-99 by default) |
+| `{rand:N}` | N random alphanumeric characters |
+| `{ts}` | Unix timestamp |
+
+### Update rules at runtime (admin)
+
+```bash
+# Login first to get JWT
+TOKEN=$(curl -s -X POST https://your-domain.com/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"email":"admin@example.com","password":"yourpass"}' \
+  | python3 -c "import sys,json;print(json.load(sys.stdin)['token'])")
+
+# Update naming rules
+curl -X PUT https://your-domain.com/api/admin/naming-rules \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "template": "{first}{sep}{second}{num}",
+    "separator": "",
+    "first_words": ["jhopan", "sari", "bima", "arya"],
+    "second_words": ["utama", "sari", "jaya", "mulia"],
+    "num_min": 10,
+    "num_max": 99,
+    "num_probability": 80
+  }'
+```
+
+### Web UI behavior
+
+- **Guest mode (default):** auto-generate email from naming rules on page load. No login required. Click "Random" for new email. Type custom username + Enter to change.
+- **Admin mode:** login via `/app/login.html` for admin panel (users, naming rules).
+
+## Cloudflare setup
+
+### Worker
+
+Worker name: `tempmailbyjhopanstore` (fixed).
+
+Worker config (`cloudflare-worker/wrangler.toml`):
+- `workers_dev = false` (no public workers.dev URL)
+- `preview_urls = false`
+- Secrets set via `wrangler secret put`: `TEMPMAIL_SERVER_URL`, `TEMPMAIL_API_KEY`, `FORWARD_LIST`
+
+### Email Routing
+
+- Catch-all rule: `*@domain → worker:tempmailbyjhopanstore`
+- Enabled via `wrangler email routing enable` or Cloudflare API
+- MX records must be Cloudflare-managed (delete any existing non-CF MX records first)
+
+### Tunnel
+
+- Tunnel name: `tempmailbyjhopanstore` (default, configurable)
+- Config: `/etc/cloudflared/config.yml` with `disableChunkedEncoding: true` for SSE support
+
+## menutempmail
+
+Dashboard + control panel:
+
+```text
+=== TempMail By JhopanStore ===
+        Credit JhopanStore
+Platform        : Debian GNU/Linux 13 (trixie) / x86_64
+Service         : active | 20.5 MiB
+Web LAN         : http://192.168.1.57:8081/app/
+Inbox           : 4 inbox | 4 message
+SQLite backup   : active
+--- Cloudflare profiles ---
+* wrangler-oauth: wrangler OAuth | Worker: deployed
+Domains:
+  renunganbot.qzz.io | profile=wrangler-oauth | routing=ON
+Tunnel: 0ee13ee3-... | host: tempmail.renunganbot.qzz.io
+CF Tunnel      : active
+```
+
+Menu options:
+1-2: Manage CF profiles + domains
+3-4: Login Wrangler + CF Tunnel (device auth)
+5-6: Deploy worker + email routing
+7: Email copies config
+8: SETUP GUIDED (one-shot all steps)
+9: AUTO SETUP (step-by-step)
+L1-L4: Logout/reset/delete worker
+10: Refresh status
+
+## Security
+
+- `JWT_SECRET` and `EMAIL_API_KEY` are mandatory; no hardcoded fallback.
+- Worker ingress uses `X-Email-API-Key` header.
+- `workers_dev = false` — Worker not publicly accessible.
+- Keep Cloudflare API tokens, Worker secrets, DB, and admin credentials outside Git.
+- Keep app port private/LAN-only unless accessed through Cloudflare Tunnel.
+- Email forwarding/copies are opt-in (OFF by default).
 
 ## Development
 
@@ -181,23 +291,13 @@ go test ./...
 go vet ./...
 ```
 
-Docs for future development:
+## Docs
 
 - [`AGENTS.md`](AGENTS.md) — repository rules and agent/developer instructions.
 - [`docs/PRD.md`](docs/PRD.md) — product requirements.
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — system design.
-- [`docs/TDD.md`](docs/TDD.md) — test discipline.
 - [`docs/SDD.md`](docs/SDD.md) — spec-driven change process.
 - [`docs/RUNBOOK.md`](docs/RUNBOOK.md) — deploy, operation, test, recovery.
-- [`docs/ARMBIAN.md`](docs/ARMBIAN.md) — Linux/Armbian deployment specifics.
-
-## Security
-
-- `JWT_SECRET` is mandatory; no hardcoded fallback.
-- Worker ingress uses `X-Email-API-Key`.
-- Keep Cloudflare API tokens, Worker secrets, DB, and admin credentials outside Git.
-- Keep port 8080 private/LAN-only unless accessed through Cloudflare Tunnel/Tailscale.
-- Email forwarding/copies are opt-in.
 
 ## License
 
