@@ -43,6 +43,5 @@ func ConfigHandler(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"domains":   domains,
 		"site_name": siteName,
-		"api_key":   os.Getenv("EMAIL_API_KEY"),
 	})
 }

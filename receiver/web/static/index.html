@@ -68,7 +68,7 @@
     <div id="messageView" class="flex-1 flex flex-col overflow-hidden"></div>
   </div>
 
-  <script src="/app/app.js?v=6"></script>
+  <script src="/app/app.js?v=7"></script>
   <script>
     // Display user email
     const user = JSON.parse(localStorage.getItem('auth_user') || '{}');
@@ -81,7 +81,7 @@
         if (res.ok) {
           const cfg = await res.json();
           window.TEMPMAIL_DOMAINS = cfg.domains || ['example.com'];
-          window.TEMPMAIL_API_KEY = cfg.api_key || '';
+          window.TEMPMAIL_API_KEY = '';
         } else {
           window.TEMPMAIL_DOMAINS = ['example.com'];
         }
@@ -91,7 +91,6 @@
       const sel = document.getElementById('domain');
       const saved = localStorage.getItem('email_domain') || (window.TEMPMAIL_DOMAINS[0] || 'example.com');
       sel.innerHTML = window.TEMPMAIL_DOMAINS.map(d => `<option value="${d}" ${d === saved ? 'selected' : ''}>@${d}</option>`).join('');
-      API.apiKey = window.TEMPMAIL_API_KEY;
       init();
     }
     loadDomains();

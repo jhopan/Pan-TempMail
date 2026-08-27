@@ -4,23 +4,16 @@
 const API = {
   token: localStorage.getItem('auth_token'),
   user: JSON.parse(localStorage.getItem('auth_user') || 'null'),
-  apiKey: window.TEMPMAIL_API_KEY || '',
 
   async request(path, opts = {}) {
     const headers = { 'Content-Type': 'application/json', ...opts.headers };
-    // Prefer JWT if available, fallback to API key
     if (this.token) {
       headers.Authorization = 'Bearer ' + this.token;
-    } else if (this.apiKey) {
-      headers['X-Email-API-Key'] = this.apiKey;
     }
     const res = await fetch(path, { ...opts, headers });
-    if (res.status === 401 && this.token) {
-      // JWT expired, clear and retry as guest
-      localStorage.removeItem('auth_token');
-      localStorage.removeItem('auth_user');
-      this.token = null;
-      return this.request(path, opts);
+    if (res.status === 401) {
+      window.location.href = '/app/login.html';
+      return null;
     }
     return res;
   },
@@ -65,16 +58,12 @@ function getDomains() {
 }
 
 function init() {
-  // Guest mode: if no JWT, use API key (no redirect to login)
-  if (!API.token && !API.apiKey) {
-    // No auth at all — redirect to login
+  if (!API.token) {
     window.location.href = '/app/login.html';
     return;
   }
-  // Load saved email or generate random
   const savedUser = localStorage.getItem('email_user');
   if (!savedUser) {
-    // Auto-generate random email on first visit
     randomEmail();
     return;
   }
@@ -183,15 +172,8 @@ async function loadInbox() {
 
 function connectSSE() {
   if (sse) sse.close();
-  if (!API.token && !API.apiKey) return;
-  // Guest mode: use api_key query param; JWT mode: use token query param
-  let url = '/sse/' + encodeURIComponent(currentEmail) + '?';
-  if (API.token) {
-    url += 'token=' + encodeURIComponent(API.token);
-  } else {
-    url += 'api_key=' + encodeURIComponent(API.apiKey);
-  }
-  sse = new EventSource(url);
+  if (!API.token) return;
+  sse = new EventSource('/sse/' + encodeURIComponent(currentEmail) + '?token=' + encodeURIComponent(API.token));
   sse.addEventListener('connected', () => updateSSEStatus('live'));
   sse.addEventListener('new_email', () => { loadInbox(); });
   sse.onerror = () => updateSSEStatus('reconnecting');
