@@ -82,12 +82,22 @@ func ginLimiterMiddleware(lmt *limiter.Limiter) gin.HandlerFunc {
 	}
 }
 
-// sseAuthMiddleware validates JWT from query param for SSE connections.
+// sseAuthMiddleware validates JWT OR API key from query param for SSE connections.
+// EventSource cannot send custom headers, so auth must be via query param.
 func sseAuthMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
+		// Try API key first (guest mode)
+		apiKey := c.Query("api_key")
+		envKey := os.Getenv("EMAIL_API_KEY")
+		if apiKey != "" && envKey != "" && apiKey == envKey {
+			c.Set("role", "guest")
+			c.Next()
+			return
+		}
+		// Fallback to JWT
 		tokenStr := c.Query("token")
 		if tokenStr == "" {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "Token required"})
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "Token or api_key required"})
 			c.Abort()
 			return
 		}
@@ -199,7 +209,21 @@ func SetupRouter() *gin.Engine {
 	loginMW := ginLimiterMiddleware(loginLimiter)
 	r.POST("/api/auth/login", loginMW, authHandler.Login)
 
-	// Protected routes (require authentication)
+	// Public API routes (API key auth, no login required)
+	publicAPI := r.Group("/api")
+	publicAPI.Use(middleware.APIKeyMiddleware())
+	{
+		publicAPI.GET("/inbox/:email", apiMW, handlers.GetInbox)
+		publicAPI.POST("/inbox", apiMW, handlers.CreateInboxAPI)
+		publicAPI.GET("/inbox/:email/wait", apiMW, handlers.WaitForMessage)
+		publicAPI.GET("/message/:id", apiMW, handlers.GetMessage)
+		publicAPI.GET("/message/:id/attachments", apiMW, handlers.GetMessageAttachments)
+		publicAPI.GET("/attachment/:id", apiMW, handlers.GetAttachment)
+		publicAPI.DELETE("/inbox/:email", delMW, handlers.DeleteInbox)
+		publicAPI.DELETE("/message/:id", delMW, handlers.DeleteMessage)
+	}
+
+	// Protected routes (require JWT authentication)
 	protected := r.Group("/api")
 	protected.Use(middleware.AuthMiddleware())
 	{
@@ -220,27 +244,6 @@ func SetupRouter() *gin.Engine {
 		// Naming rules for auto-generated inbox addresses
 		admin.GET("/naming-rules", handlers.GetNamingRules)
 		admin.PUT("/naming-rules", handlers.UpdateNamingRules)
-	}
-
-	// Protected API routes (require authentication)
-	authAPI := r.Group("/api")
-	authAPI.Use(middleware.AuthMiddleware())
-	{
-		// Inbox endpoints
-		authAPI.GET("/inbox/:email", apiMW, handlers.GetInbox)
-		authAPI.DELETE("/inbox/:email", delMW, handlers.DeleteInbox)
-
-		// Automation: create inbox programmatically
-		authAPI.POST("/inbox", apiMW, handlers.CreateInboxAPI)
-
-		// Automation: wait for message (blocking, no polling)
-		authAPI.GET("/inbox/:email/wait", apiMW, handlers.WaitForMessage)
-
-		// Message endpoints
-		authAPI.GET("/message/:id", apiMW, handlers.GetMessage)
-		authAPI.DELETE("/message/:id", delMW, handlers.DeleteMessage)
-		authAPI.GET("/message/:id/attachments", apiMW, handlers.GetMessageAttachments)
-		authAPI.GET("/attachment/:id", apiMW, handlers.GetAttachment)
 	}
 
 	// SSE route - auth via query param (EventSource cannot send custom headers)

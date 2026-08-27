@@ -15,6 +15,8 @@ if [ $# -ge 1 ]; then
 else
   read -r -p "Domain untuk TempMail (contoh: domainkamu.com): " DOMAIN
 fi
+# Sanitize: buang https://, http://, trailing slash
+DOMAIN=$(printf '%s' "$DOMAIN" | sed -E 's#^https?://##; s#/+$##')
 [ -n "$DOMAIN" ] || { echo "Domain wajib diisi."; exit 1; }
 WEB_HOST=${2:-tempmail.$DOMAIN}
 echo "Domain : $DOMAIN"
@@ -30,7 +32,12 @@ WORKER_DIR=/opt/tempmail/worker
 pause() { read -r -p "$1" _; }
 
 wrangler_logged_in() {
-  (cd "$WORKER_DIR" && npx wrangler whoami 2>&1) | grep -q "You are logged in"
+  # Cek cepat: file token lokal ada? (instan, tanpa API call)
+  if [ -f /root/.wrangler/config/default.toml ] || [ -f /root/.config/.wrangler/config/default.toml ]; then
+    return 0
+  fi
+  # Fallback: tanya API (max 20s)
+  timeout 20 bash -c "cd '$WORKER_DIR' && CI=true npx wrangler whoami </dev/null 2>&1" | grep -q "You are logged in"
 }
 
 echo
@@ -64,7 +71,7 @@ else
     attempt=$((attempt+1))
     [ $attempt -le 3 ] || { echo "Login wrangler 3x gagal."; exit 1; }
     logf=$(mktemp)
-    (cd "$WORKER_DIR" && npx wrangler login --browser=false --device) >"$logf" 2>&1 &
+    (cd "$WORKER_DIR" && CI=true npx wrangler login --browser=false --device </dev/null) >"$logf" 2>&1 &
     pid=$!
     url=""; code=""
     for _ in $(seq 1 15); do
@@ -86,7 +93,7 @@ else
   done
   echo "Wrangler login OK."
 fi
-ACCOUNT_ID=$(cd "$WORKER_DIR" && npx wrangler whoami 2>/dev/null | grep -oE '[a-f0-9]{32}' | head -1)
+ACCOUNT_ID=$(timeout 20 bash -c "cd '$WORKER_DIR' && CI=true npx wrangler whoami </dev/null 2>/dev/null" | grep -oE '[a-f0-9]{32}' | head -1)
 [ -n "$ACCOUNT_ID" ] || { echo "Gagal ambil Account ID. Ulangi login."; exit 1; }
 echo "Account ID: $ACCOUNT_ID"
 
@@ -154,23 +161,64 @@ echo "== [5/7] Deploy worker + secrets =="
 # Baca EMAIL_API_KEY langsung dari env file (hindari shell expansion di script ini)
 _api_key=$(grep '^EMAIL_API_KEY=' "$APP_ENV" | cut -d= -f2-)
 _server_url="https://$WEB_HOST"
+# Hapus worker lama dulu biar bersih (buang vars binding + secret usang), lalu deploy fresh
 (cd "$WORKER_DIR" \
   && export CLOUDFLARE_ACCOUNT_ID="$ACCOUNT_ID" \
-  && printf '%s\n' "$_server_url" | npx wrangler secret put TEMPMAIL_SERVER_URL \
-  && printf '%s\n' "$_api_key" | npx wrangler secret put TEMPMAIL_API_KEY \
-  && printf '%s\n' "" | npx wrangler secret put FORWARD_LIST \
-  && npx wrangler deploy)
-echo "Worker deployed."
+  && { CI=true npx wrangler delete </dev/null 2>/dev/null || true; } \
+  && CI=true npx wrangler deploy \
+  && printf '%s\n' "$_server_url" | CI=true npx wrangler secret put TEMPMAIL_SERVER_URL \
+  && printf '%s\n' "$_api_key" | CI=true npx wrangler secret put TEMPMAIL_API_KEY \
+  && printf '%s\n' "" | CI=true npx wrangler secret put FORWARD_LIST)
+echo "Worker deployed + secrets set."
 
 echo
 echo "== [6/7] Aktifkan Email Routing + catch-all =="
 cd "$WORKER_DIR"
-npx wrangler email routing enable "$DOMAIN" || true
-npx wrangler email routing dns unlock "$DOMAIN" || true
-npx wrangler email routing rules update "$DOMAIN" catch-all \
-  --name "TempMail catch-all" --enabled \
-  --action-type worker --action-value tempmailbyjhopanstore
-echo "Catch-all *@$DOMAIN -> worker aktif."
+# 1. Unlock DNS dulu (buang MX non-Cloudflare), -y skip konfirmasi
+CI=true npx wrangler email routing dns unlock "$DOMAIN" -y </dev/null || true
+# 2. Enable email routing
+if ! CI=true npx wrangler email routing enable "$DOMAIN" </dev/null 2>&1; then
+  echo ""
+  echo "⚠️  Enable gagal. Kemungkinan masih ada MX record non-Cloudflare."
+  echo "   Hapus manual di dashboard:"
+  echo "   https://dash.cloudflare.com -> $DOMAIN -> DNS -> Records"
+  echo "   Cari record tipe MX (misal: mail.$DOMAIN) lalu Delete."
+  echo "   Setelah itu jalankan menu 8 lagi."
+  echo ""
+fi
+# 3. Catch-all -> worker via Cloudflare API langsung
+#    (wrangler CLI catch-all cuma support forward/drop, tidak support worker)
+_oauth=$(python3 -c 'import re,sys
+for p in ["/root/.wrangler/config/default.toml","/root/.config/.wrangler/config/default.toml"]:
+    try:
+        t=open(p).read(); m=re.search(r"oauth_token\s*=\s*\"([^\"]+)\"",t)
+        if m: print(m.group(1)); sys.exit(0)
+    except OSError: pass
+print("")')
+D="$DOMAIN" TOK="$_oauth" python3 - <<'PY'
+import json, os, urllib.request, sys
+tok=os.environ['TOK']; dom=os.environ['D']
+if not tok: print("Token OAuth tidak ditemukan. Skip catch-all."); sys.exit(0)
+def api(method, path, body=None):
+    req=urllib.request.Request("https://api.cloudflare.com/client/v4"+path,
+        data=json.dumps(body).encode() if body else None, method=method,
+        headers={"Authorization":"Bearer "+tok,"Content-Type":"application/json"})
+    try:
+        return json.load(urllib.request.urlopen(req))
+    except Exception as e:
+        return {"success":False,"errors":[{"message":str(e)}]}
+z=api("GET","/zones?name="+dom)
+if not z.get("result"): print("Zone tidak ditemukan untuk",dom); sys.exit(1)
+zid=z["result"][0]["id"]
+api("POST","/zones/%s/email/routing/enable"%zid,{})
+rule={"name":"TempMail catch-all","enabled":True,
+      "matchers":[{"type":"all"}],
+      "actions":[{"type":"worker","value":["tempmailbyjhopanstore"]}]}
+r=api("PUT","/zones/%s/email/routing/rules/catch_all"%zid,rule)
+if r.get("success"): print("Catch-all *@%s -> worker tempmailbyjhopanstore AKTIF"%dom)
+else: print("Gagal set catch-all:",r.get("errors"))
+PY
+echo "Step 6 selesai."
 
 echo
 echo "== [7/7] Simpan state + activate domain + verify =="

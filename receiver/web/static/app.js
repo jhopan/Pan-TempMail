@@ -4,14 +4,23 @@
 const API = {
   token: localStorage.getItem('auth_token'),
   user: JSON.parse(localStorage.getItem('auth_user') || 'null'),
+  apiKey: window.TEMPMAIL_API_KEY || '',
 
   async request(path, opts = {}) {
     const headers = { 'Content-Type': 'application/json', ...opts.headers };
-    if (this.token) headers.Authorization = 'Bearer ' + this.token;
+    // Prefer JWT if available, fallback to API key
+    if (this.token) {
+      headers.Authorization = 'Bearer ' + this.token;
+    } else if (this.apiKey) {
+      headers['X-Email-API-Key'] = this.apiKey;
+    }
     const res = await fetch(path, { ...opts, headers });
-    if (res.status === 401) {
-      window.location.href = '/app/login.html';
-      return null;
+    if (res.status === 401 && this.token) {
+      // JWT expired, clear and retry as guest
+      localStorage.removeItem('auth_token');
+      localStorage.removeItem('auth_user');
+      this.token = null;
+      return this.request(path, opts);
     }
     return res;
   },
@@ -56,12 +65,19 @@ function getDomains() {
 }
 
 function init() {
-  if (!API.token) {
+  // Guest mode: if no JWT, use API key (no redirect to login)
+  if (!API.token && !API.apiKey) {
+    // No auth at all — redirect to login
     window.location.href = '/app/login.html';
     return;
   }
-  // Load saved email
-  const savedUser = localStorage.getItem('email_user') || 'abc';
+  // Load saved email or generate random
+  const savedUser = localStorage.getItem('email_user');
+  if (!savedUser) {
+    // Auto-generate random email on first visit
+    randomEmail();
+    return;
+  }
   const savedDomain = localStorage.getItem('email_domain') || getDomains()[0];
   currentEmail = savedUser + '@' + savedDomain;
   document.getElementById('username').value = savedUser;
@@ -145,8 +161,15 @@ async function loadInbox() {
 
 function connectSSE() {
   if (sse) sse.close();
-  if (!API.token) return;
-  sse = new EventSource('/sse/' + encodeURIComponent(currentEmail) + '?token=' + encodeURIComponent(API.token));
+  if (!API.token && !API.apiKey) return;
+  // Guest mode: use api_key query param; JWT mode: use token query param
+  let url = '/sse/' + encodeURIComponent(currentEmail) + '?';
+  if (API.token) {
+    url += 'token=' + encodeURIComponent(API.token);
+  } else {
+    url += 'api_key=' + encodeURIComponent(API.apiKey);
+  }
+  sse = new EventSource(url);
   sse.addEventListener('connected', () => updateSSEStatus('live'));
   sse.addEventListener('new_email', () => { loadInbox(); });
   sse.onerror = () => updateSSEStatus('reconnecting');
@@ -173,7 +196,11 @@ async function openMessage(id) {
   ]);
   if (!msgRes || !msgRes.ok) return;
   selectedMsg = await msgRes.json();
-  const attData = attRes?.ok ? await attRes.json() : [];
+  let attData = [];
+  if (attRes?.ok) {
+    try { attData = await attRes.json() || []; } catch { attData = []; }
+    if (!Array.isArray(attData)) attData = [];
+  }
   renderMessage(selectedMsg, attData);
 }
 
@@ -246,6 +273,10 @@ function renderMessage(msg, attachments = []) {
       </div>
     </div>` : '';
 
+  const bodyHtml = html
+    ? '<iframe id="msgFrame" sandbox="allow-same-origin" class="w-full border-0 bg-gray-950" style="height:calc(100vh - 200px)"></iframe>'
+    : '<div class="p-5"><pre class="whitespace-pre-wrap font-sans text-gray-200 text-sm leading-relaxed">' + escapeHtml(msg.text_body || '') + '</pre></div>';
+
   container.innerHTML = `
     <div class="p-5 border-b border-gray-800">
       <div class="flex items-start justify-between">
@@ -257,10 +288,8 @@ function renderMessage(msg, attachments = []) {
       </div>
     </div>
     ${attHtml}
-    ${codesHtml}
-    ${linksHtml}
     <div class="flex-1 overflow-y-auto">
-      ${html ? '<iframe id="msgFrame" sandbox="allow-same-origin" class="w-full border-0 bg-gray-950" style="height:calc(100vh - 200px)"></iframe>' : '<div class="p-5"><pre class="whitespace-pre-wrap font-sans text-gray-200 text-sm leading-relaxed">${escapeHtml(msg.text_body || '')}</pre></div>'}
+      ${bodyHtml}
     </div>
   `;
   if (html) {

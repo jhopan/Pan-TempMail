@@ -347,8 +347,12 @@ run_login() {
 }
 
 wrangler_logged_in() {
-  # wrangler whoami always exits 0; must grep output
-  (cd "$WORKER_DIR" && npx wrangler whoami 2>&1) | grep -q "You are logged in"
+  # Cek cepat: file token lokal ada? (instan, tanpa API call)
+  if [ -f /root/.wrangler/config/default.toml ] || [ -f /root/.config/.wrangler/config/default.toml ]; then
+    return 0
+  fi
+  # Fallback: tanya API (max 20s). whoami always exits 0; must grep output.
+  timeout 20 bash -c "cd '$WORKER_DIR' && CI=true npx wrangler whoami </dev/null 2>&1" | grep -q "You are logged in"
 }
 
 logout_wrangler() {
@@ -388,7 +392,7 @@ login_wrangler() {
     echo "Wrangler sudah login."
     return
   fi
-  run_login "Wrangler" bash -c "cd '$WORKER_DIR' && npx wrangler login --browser=false --device"
+  run_login "Wrangler" bash -c "cd '$WORKER_DIR' && CI=true npx wrangler login --browser=false --device </dev/null"
   if wrangler_logged_in; then
     echo "Wrangler login OK."
   else
@@ -471,16 +475,30 @@ deploy_worker() {
   [ -n "$web_host" ] || { echo "Setup tunnel web dulu."; return; }
   (cd "$WORKER_DIR" && \
     export CLOUDFLARE_API_TOKEN="$token" CLOUDFLARE_ACCOUNT_ID="$account"; \
-    printf '%s\n' "https://$web_host" | npx wrangler secret put TEMPMAIL_SERVER_URL && \
-    printf '%s\n' "$api_key" | npx wrangler secret put TEMPMAIL_API_KEY && \
-    printf '%s\n' "$copies" | npx wrangler secret put FORWARD_LIST && \
-    npx wrangler deploy)
+    CI=true npx wrangler deploy && \
+    printf '%s\n' "https://$web_host" | CI=true npx wrangler secret put TEMPMAIL_SERVER_URL && \
+    printf '%s\n' "$api_key" | CI=true npx wrangler secret put TEMPMAIL_API_KEY && \
+    printf '%s\n' "$copies" | CI=true npx wrangler secret put FORWARD_LIST)
   CF_PROFILE="$profile" python3 - "$STATE" <<'PY'
 import json,os,sys
 path=sys.argv[1]; d=json.load(open(path)); d['profiles'][os.environ['CF_PROFILE']]['worker_deployed']=True
 open(path,'w').write(json.dumps(d,indent=2)+'\n')
 PY
   echo "Worker profile $profile deployed. Salinan: ${copies:-OFF}"
+}
+
+delete_worker() {
+  local profile token account
+  profile=$(choose_profile) || return
+  ensure_worker_tools
+  token=$(profile_token "$profile")
+  account=$(profile_account_id "$profile")
+  read -r -p "Hapus worker tempmailbyjhopanstore dari Cloudflare? (y/N): " c
+  [ "$c" = y ] || { echo "Batal."; return; }
+  (cd "$WORKER_DIR" && \
+    export CLOUDFLARE_API_TOKEN="$token" CLOUDFLARE_ACCOUNT_ID="$account"; \
+    CI=true npx wrangler delete </dev/null)
+  echo "Worker dihapus dari Cloudflare."
 }
 
 enable_routing_for_domain() {
@@ -571,6 +589,7 @@ main() {
     echo 'L1. Logout Wrangler (hapus credential)'
     echo 'L2. Logout CF Tunnel (hapus cert + service)'
     echo 'L3. RESET SEMUA credential Cloudflare'
+    echo 'L4. Hapus Worker dari Cloudflare (bersih-bersih)'
     echo '---'
     echo '10. Refresh status'
     echo '0. Keluar'
@@ -583,6 +602,7 @@ main() {
       L1|l1) logout_wrangler ;;
       L2|l2) logout_tunnel ;;
       L3|l3) reset_all ;;
+      L4|l4) delete_worker ;;
       10) : ;; 0) exit 0 ;; *) echo 'Pilihan salah.' ;;
     esac
   done
