@@ -12,9 +12,10 @@ No public port 25, Maddy, PostgreSQL, Node.js runtime, or Nginx is required in C
 
 - Single Go binary: HTTP API, embedded vanilla web UI, direct/local SMTP mode, SQLite.
 - Verified low-resource Debian deployment: TempMail process around 20MB RSS.
-- Automation API with API key auth: create inbox, wait for email, extract OTP/link.
-- Guest mode UI: auto-generate email on page load, no login required.
+- Web UI requires login (JWT). No guest mode — safe from public access.
+- Automation API with API key auth (`X-Email-API-Key` header): create inbox, wait for email, extract OTP/link.
 - Configurable naming rules: human-like Indonesian names (e.g. `langitbiru42`, `senjaindah17`), editable at runtime via admin API.
+- Automation scripts can send custom `username` in `POST /api/inbox` — server uses it directly, no naming rules needed.
 - Multiple temp-mail domains in one instance.
 - Domains can originate from multiple Cloudflare account profiles.
 - One Cloudflare Tunnel can route all profile Workers to one TempMail host.
@@ -98,7 +99,16 @@ CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o tempmail-linu
 
 ## Automation API
 
-All endpoints (except `/api/auth/login` and `/api/setup`) accept `X-Email-API-Key` header for automation. No JWT login required.
+All inbox/message endpoints accept `X-Email-API-Key` header for automation — no JWT login required for scripts. Web UI requires JWT login.
+
+### Auth model
+
+| Access | Auth method | Use case |
+|---|---|---|
+| Web UI | JWT (`Authorization: Bearer <token>`) | Human using browser, must login |
+| Automation scripts | `X-Email-API-Key` header | Bots, CI/CD, scripts |
+| Worker ingestion | `X-Email-API-Key` header | Cloudflare Worker → server |
+| `/api/config` | None (public) | Domains + site name only (no secrets) |
 
 ### Endpoints
 
@@ -127,7 +137,14 @@ All endpoints (except `/api/auth/login` and `/api/setup`) accept `X-Email-API-Ke
 API_KEY="your-api-key"
 BASE="https://your-domain.com"
 
-# 1. Create inbox (name auto-generated from naming rules)
+# 1a. Create inbox with custom username (script controls name)
+curl -s -X POST "$BASE/api/inbox" \
+  -H "Content-Type: application/json" \
+  -H "X-Email-API-Key: $API_KEY" \
+  -d '{"username":"jhopan.cloudflare","domain":"your-domain.com"}'
+# → {"email":"jhopan.cloudflare@your-domain.com","expires":"24h",...}
+
+# 1b. OR create inbox with auto-generated name (naming rules)
 curl -s -X POST "$BASE/api/inbox" \
   -H "Content-Type: application/json" \
   -H "X-Email-API-Key: $API_KEY" \
@@ -138,7 +155,7 @@ curl -s -X POST "$BASE/api/inbox" \
 #    (site sends verification email)
 
 # 3. Wait for email (blocking — auto-returns when email arrives)
-curl -s "$BASE/api/inbox/langitbiru42@your-domain.com/wait" \
+curl -s "$BASE/api/inbox/jhopan.cloudflare@your-domain.com/wait" \
   -H "X-Email-API-Key: $API_KEY"
 # → {"id":7,"codes":["284716"],"links":["https://verify.example.com/token=xyz"],...}
 
@@ -155,10 +172,11 @@ import requests
 BASE = "https://your-domain.com"
 HEADERS = {"X-Email-API-Key": "your-api-key"}
 
-# 1. Create inbox
+# 1. Create inbox with custom username (script controls name)
 r = requests.post(f"{BASE}/api/inbox", headers=HEADERS,
-                   json={"domain": "your-domain.com"})
+                   json={"username": "jhopan.cloudflare", "domain": "your-domain.com"})
 email = r.json()["email"]
+# Or auto-generated: json={"domain": "your-domain.com"}
 
 # 2. Register on target site with this email
 # ... (your registration code here) ...
@@ -219,8 +237,18 @@ curl -X PUT https://your-domain.com/api/admin/naming-rules \
 
 ### Web UI behavior
 
-- **Guest mode (default):** auto-generate email from naming rules on page load. No login required. Click "Random" for new email. Type custom username + Enter to change.
-- **Admin mode:** login via `/app/login.html` for admin panel (users, naming rules).
+- **Login required:** all pages require JWT login. No guest mode. Opening `/app/` without login redirects to `/app/login.html`.
+- **Admin login:** use email + password set during `/api/setup` bootstrap.
+- After login: auto-generate email from naming rules, or type custom username + Enter.
+- **Admin panel:** login via `/app/login.html` for admin features (users, naming rules).
+
+### Security model
+
+- Web UI: JWT login required (no public access).
+- Automation: `X-Email-API-Key` header (for scripts only, not exposed in any API response).
+- `/api/config`: public but returns only domains + site_name (no secrets).
+- Worker: `workers_dev = false`, not publicly accessible.
+- Email copies/forwarding: opt-in, OFF by default.
 
 ## Cloudflare setup
 
