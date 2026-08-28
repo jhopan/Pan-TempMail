@@ -525,6 +525,7 @@ PY
 
 dashboard() {
   local service rss inboxes messages backup tunnel copy domains profiles
+  local C_GREEN='\033[0;32m' C_RED='\033[0;31m' C_CYAN='\033[0;36m' C_YELLOW='\033[0;33m' C_BOLD='\033[1m' C_DIM='\033[2m' C_NC='\033[0m'
   service=$(systemctl is-active tempmail 2>/dev/null || true)
   rss=$(ps -o rss= -C tempmail 2>/dev/null | awk 'NR==1 {printf "%.1f MiB",$1/1024}')
   inboxes=$(sqlite3 "$APP/data/tempmail.db" 'SELECT count(*) FROM inboxes;' 2>/dev/null || echo 0)
@@ -532,26 +533,44 @@ dashboard() {
   backup=$(systemctl is-active tempmail-backup.timer 2>/dev/null || true)
   tunnel=$(systemctl is-active cloudflared 2>/dev/null || true)
   copy=$(state_get_copy); [ -n "$copy" ] || copy=OFF
-  echo '=== TempMail By JhopanStore ==='
-  echo '        Credit JhopanStore'
-  printf 'Platform        : %s / %s\n' "$(. /etc/os-release; echo "$PRETTY_NAME")" "$(uname -m)"
-  printf 'Service         : %s | %s\n' "${service:-inactive}" "${rss:-0 MiB}"
-  printf 'Web LAN         : http://%s:%s/app/\n' "$(hostname -I | awk '{print $1}')" "$(app_port)"
-  printf 'Inbox           : %s inbox | %s message\n' "$inboxes" "$messages"
-  printf 'SQLite backup   : %s\n' "${backup:-inactive}"
-  echo '--- Cloudflare profiles ---'
+  echo
+  echo -e "${C_BOLD}╔══════════════════════════════════════════╗${C_NC}"
+  echo -e "${C_BOLD}║  ⚡ TempMail By JhopanStore                 ║${C_NC}"
+  echo -e "${C_BOLD}║  ${C_CYAN}   Credit JhopanStore${C_NC}                        ║"
+  echo -e "${C_BOLD}╚══════════════════════════════════════════╝${C_NC}"
+  echo
+  printf "  ${C_DIM}Platform${C_NC}      : %s / %s\n" "$(. /etc/os-release; echo "$PRETTY_NAME")" "$(uname -m)"
+  if [ "${service:-inactive}" = "active" ]; then
+    printf "  ${C_DIM}Service${C_NC}       : ${C_GREEN}%s${C_NC} | %s\n" "${service:-inactive}" "${rss:-0 MiB}"
+  else
+    printf "  ${C_DIM}Service${C_NC}       : ${C_RED}%s${C_NC} | %s\n" "${service:-inactive}" "${rss:-0 MiB}"
+  fi
+  printf "  ${C_DIM}Web LAN${C_NC}      : ${C_CYAN}http://%s:%s/app/${C_NC}\n" "$(hostname -I | awk '{print $1}')" "$(app_port)"
+  printf "  ${C_DIM}Inbox${C_NC}         : %s inbox | %s message\n" "$inboxes" "$messages"
+  if [ "${backup:-inactive}" = "active" ]; then
+    printf "  ${C_DIM}SQLite backup${C_NC}: ${C_GREEN}%s${C_NC}\n" "${backup:-inactive}"
+  else
+    printf "  ${C_DIM}SQLite backup${C_NC}: ${C_RED}%s${C_NC}\n" "${backup:-inactive}"
+  fi
+  echo
+  echo -e "  ${C_BOLD}--- Cloudflare ---${C_NC}"
   python3 - "$STATE" <<'PY'
 import json,sys
 d=json.load(open(sys.argv[1])); active=d.get('active_profile','')
-if not d['profiles']: print('Tidak ada akun Cloudflare.')
-for k,v in d['profiles'].items(): print(f"{'*' if k==active else ' '} {k}: {v.get('label',k)} | Worker: {'deployed' if v.get('worker_deployed') else 'belum'}")
-print('Domains:')
-if not d['domains']: print('  belum ada')
-for k,v in sorted(d['domains'].items()): print(f"  {k} | profile={v.get('profile')} | routing={'ON' if v.get('routing') else 'OFF'}")
-t=d['tunnel']; print('Tunnel:', t.get('id') or 'belum dibuat', '| host:', t.get('web_host') or 'belum diatur', '| account:',t.get('account') or 'belum login')
+if not d['profiles']: print("  Tidak ada akun Cloudflare.")
+for k,v in d['profiles'].items(): print(f"  {'★' if k==active else ' '} {k}: {v.get('label',k)} | Worker: {'✓ deployed' if v.get('worker_deployed') else '✗ belum'}")
+print("  Domains:")
+if not d['domains']: print("    belum ada")
+for k,v in sorted(d['domains'].items()): print(f"    {k} | profile={v.get('profile')} | routing={'ON' if v.get('routing') else 'OFF'}")
+t=d['tunnel']; print(f"  Tunnel: {t.get('id') or 'belum dibuat'} | host: {t.get('web_host') or 'belum diatur'}")
 PY
-  printf 'CF Tunnel      : %s\n' "${tunnel:-not configured}"
-  printf 'Salinan email  : %s\n' "$copy"
+  if [ "${tunnel:-not configured}" = "active" ]; then
+    printf "  ${C_DIM}CF Tunnel${C_NC}    : ${C_GREEN}%s${C_NC}\n" "${tunnel:-not configured}"
+  else
+    printf "  ${C_DIM}CF Tunnel${C_NC}    : ${C_RED}%s${C_NC}\n" "${tunnel:-not configured}"
+  fi
+  printf "  ${C_DIM}Salinan email${C_NC}: %s\n" "$copy"
+  echo
 }
 
 full_setup() {
@@ -574,19 +593,20 @@ manage_admin() {
   local port
   port=$(grep '^PORT=' "$app_env" | cut -d= -f2); port=${port:-8080}
   local base="http://127.0.0.1:$port"
+  local C_GREEN='\033[0;32m' C_CYAN='\033[0;36m' C_BOLD='\033[1m' C_NC='\033[0m'
 
   while true; do
     echo
-    echo '=== Kelola Admin ==='
-    echo '1. Buat admin baru (hanya jika belum ada)'
-    echo '2. Cek user admin'
-    echo '3. Reset password admin'
-    echo '0. Kembali'
-    read -r -p 'Choose: ' c
+    echo -e "  ${C_BOLD}=== Kelola Admin ===${C_NC}"
+    echo '  1. Buat admin baru (hanya jika belum ada)'
+    echo '  2. Cek user admin'
+    echo '  3. Reset password admin'
+    echo '  0. Kembali'
+    read -r -p '  Choose: ' c
     case "$c" in
       1)
-        read -r -p "Email admin: " ad_email
-        read -r -p "Password (min 6): " ad_pass
+        read -r -p "  Email admin: " ad_email
+        read -r -p "  Password (min 6): " ad_pass
         echo
         curl -s -X POST "$base/api/setup" \
           -H "Content-Type: application/json" \
@@ -615,9 +635,8 @@ except: print('Server merespon')" 2>/dev/null || echo "Server tidak merespons"
       3)
         echo
         echo "⚠️  Reset password akan update user di database langsung."
-        read -r -p "Email admin: " ad_email
-        read -r -p "Password baru (min 6): " ad_pass
-        # Hash password with Python bcrypt, update DB
+        read -r -p "  Email admin: " ad_email
+        read -r -p "  Password baru (min 6): " ad_pass
         python3 -c "
 import bcrypt, sqlite3
 db = sqlite3.connect('/opt/tempmail/data/tempmail.db')
@@ -637,30 +656,71 @@ finally:
   done
 }
 
+show_api_key() {
+  local app_env=/etc/tempmail/tempmail.env
+  local api_key web_url
+  api_key=$(grep '^EMAIL_API_KEY=' "$app_env" 2>/dev/null | cut -d= -f2)
+  if [ -z "$api_key" ]; then
+    echo "❌ EMAIL_API_KEY belum diset di $app_env"
+    return
+  fi
+  web_url=$(python3 - "$STATE" <<'PY' 2>/dev/null
+import json,sys
+d=json.load(open(sys.argv[1]))
+print(d.get('tunnel',{}).get('web_host',''))
+PY
+)
+  local C_GREEN='\033[0;32m' C_CYAN='\033[0;36m' C_BOLD='\033[1m' C_DIM='\033[2m' C_NC='\033[0m'
+  echo
+  echo -e "  ${C_BOLD}=== API Key & Automation Info ===${C_NC}"
+  echo
+  if [ -n "$web_url" ]; then
+    echo -e "  ${C_DIM}Base URL${C_NC}: ${C_CYAN}https://$web_url${C_NC}"
+  else
+    echo -e "  ${C_DIM}Base URL${C_NC}: ${C_CYAN}http://$(hostname -I | awk '{print $1}'):$(app_port)${C_NC}"
+  fi
+  echo -e "  ${C_DIM}API Key${C_NC} : ${C_GREEN}$api_key${C_NC}"
+  echo
+  echo -e "  ${C_BOLD}Contoh penggunaan:${C_NC}"
+  echo -e "  ${C_DIM}# Buat inbox${C_NC}"
+  echo -e "  curl -X POST \"https://$web_url/api/inbox\" \\"
+  echo -e "    -H \"X-Email-API-Key: $api_key\" \\"
+  echo -e "    -H \"Content-Type: application/json\" \\"
+  echo -e "    -d '{\"username\":\"test\",\"domain\":\"your-domain.com\"}'"
+  echo
+  echo -e "  ${C_DIM}# Tunggu email (blocking)${C_NC}"
+  echo -e "  curl \"https://$web_url/api/inbox/test@your-domain.com/wait\" \\"
+  echo -e "    -H \"X-Email-API-Key: $api_key\""
+  echo
+  echo -e "  ${C_DIM}Dokumentasi lengkap:${C_NC} docs/API.md"
+  echo
+}
+
 main() {
   need_root; ensure_state
+  local C_GREEN='\033[0;32m' C_CYAN='\033[0;36m' C_BOLD='\033[1m' C_DIM='\033[2m' C_NC='\033[0m'
   while true; do
     dashboard
-    echo
-    echo '=== Control Panel ==='
-    echo '1. Kelola akun Cloudflare (CF A / CF B / ...)'
-    echo '2. Kelola domain TempMail (tambah/hapus/aktifkan)'
-    echo '3. Login Wrangler Cloudflare'
-    echo '4. Login + setup Cloudflare Tunnel'
-    echo '5. Deploy/update Worker akun aktif'
-    echo '6. Aktifkan Email Routing catch-all per domain'
-    echo '7. Atur tujuan salinan email (default OFF)'
-    echo '8. SETUP GUIDED sekali jalan (login wrangler + tunnel + worker + routing)'
-    echo '9. AUTO SETUP bertahap (manual per langkah)'
-    echo 'A. Kelola admin (buat/cek/reset password)'
-    echo '---'
-    echo 'L1. Logout Wrangler (hapus credential)'
-    echo 'L2. Logout CF Tunnel (hapus cert + service)'
-    echo 'L3. RESET SEMUA credential Cloudflare'
-    echo 'L4. Hapus Worker dari Cloudflare (bersih-bersih)'
-    echo '---'
-    echo '10. Refresh status'
-    echo '0. Keluar'
+    echo -e "  ${C_BOLD}=== Control Panel ===${C_NC}"
+    echo '  1. Kelola akun Cloudflare'
+    echo '  2. Kelola domain TempMail'
+    echo '  3. Login Wrangler Cloudflare'
+    echo '  4. Login + setup Cloudflare Tunnel'
+    echo '  5. Deploy/update Worker'
+    echo '  6. Aktifkan Email Routing catch-all'
+    echo '  7. Atur tujuan salinan email'
+    echo '  8. SETUP GUIDED (sekali jalan)'
+    echo '  9. AUTO SETUP (bertahap)'
+    echo -e "  ${C_CYAN}A. Kelola admin${C_NC}"
+    echo -e "  ${C_GREEN}K. Lihat API Key & cara pakai${C_NC}"
+    echo -e "  ${C_DIM}---${C_NC}"
+    echo '  L1. Logout Wrangler'
+    echo '  L2. Logout CF Tunnel'
+    echo '  L3. RESET SEMUA credential Cloudflare'
+    echo '  L4. Hapus Worker (bersih-bersih)'
+    echo -e "  ${C_DIM}---${C_NC}"
+    echo '  10. Refresh status'
+    echo '  0. Keluar'
     read -r -p 'Choose: ' choice
     case "$choice" in
       1) cf_profiles_menu ;; 2) domains_menu ;; 3) login_wrangler ;;
@@ -668,6 +728,7 @@ main() {
       6) enable_routing_for_domain ;; 7) set_copy_destinations ;;
       8) guided_setup ;; 9) full_setup ;;
       A|a) manage_admin ;;
+      K|k) show_api_key ;;
       L1|l1) logout_wrangler ;;
       L2|l2) logout_tunnel ;;
       L3|l3) reset_all ;;
