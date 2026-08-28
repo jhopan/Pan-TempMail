@@ -536,7 +536,6 @@ dashboard() {
   copy=$(state_get_copy); [ -n "$copy" ] || copy=OFF
   port=$(app_port)
   host=$(hostname -I | awk '{print $1}')
-  api_key=$(grep '^EMAIL_API_KEY=' "$APP_ENV" 2>/dev/null | cut -d= -f2)
   admin_email=$(sqlite3 "$APP/data/tempmail.db" 'SELECT email FROM users WHERE role="admin" LIMIT 1;' 2>/dev/null || echo "belum")
   web_url=$(python3 -c "import json;d=json.load(open('$STATE'));print(d.get('tunnel',{}).get('web_host',''))" 2>/dev/null || echo "")
   local dom_val=$(python3 -c "import json;d=json.load(open('$STATE'));doms=[k for k in d.get('domains',{})];print(', '.join(doms) if doms else 'belum ada')" 2>/dev/null || echo "belum ada")
@@ -571,7 +570,6 @@ dashboard() {
   else
     printf "  ${C_DIM}%-16s${C_NC} ${C_RED}%s${C_NC}\n" "SQLite Backup" "${backup:-inactive}"
   fi
-  printf "  ${C_DIM}%-16s${C_NC} ${C_GREEN}%s${C_NC}\n" "API Key" "${api_key:0:16}...${api_key: -8}"
   echo
   echo -e "  ${C_BOLD}─── Cloudflare ───${C_NC}"
   printf "  ${C_DIM}%-16s${C_NC} %s\n" "Worker" "$wrkr"
@@ -669,46 +667,6 @@ finally:
   done
 }
 
-show_api_key() {
-  local app_env=/etc/tempmail/tempmail.env
-  local api_key web_url
-  api_key=$(grep '^EMAIL_API_KEY=' "$app_env" 2>/dev/null | cut -d= -f2)
-  if [ -z "$api_key" ]; then
-    echo "❌ EMAIL_API_KEY belum diset di $app_env"
-    return
-  fi
-  web_url=$(python3 - "$STATE" <<'PY' 2>/dev/null
-import json,sys
-d=json.load(open(sys.argv[1]))
-print(d.get('tunnel',{}).get('web_host',''))
-PY
-)
-  local C_GREEN='\033[0;32m' C_CYAN='\033[0;36m' C_BOLD='\033[1m' C_DIM='\033[2m' C_NC='\033[0m'
-  echo
-  echo -e "  ${C_BOLD}=== API Key & Automation Info ===${C_NC}"
-  echo
-  if [ -n "$web_url" ]; then
-    echo -e "  ${C_DIM}Base URL${C_NC}: ${C_CYAN}https://$web_url${C_NC}"
-  else
-    echo -e "  ${C_DIM}Base URL${C_NC}: ${C_CYAN}http://$(hostname -I | awk '{print $1}'):$(app_port)${C_NC}"
-  fi
-  echo -e "  ${C_DIM}API Key${C_NC} : ${C_GREEN}$api_key${C_NC}"
-  echo
-  echo -e "  ${C_BOLD}Contoh penggunaan:${C_NC}"
-  echo -e "  ${C_DIM}# Buat inbox${C_NC}"
-  echo -e "  curl -X POST \"https://$web_url/api/inbox\" \\"
-  echo -e "    -H \"X-Email-API-Key: $api_key\" \\"
-  echo -e "    -H \"Content-Type: application/json\" \\"
-  echo -e "    -d '{\"username\":\"test\",\"domain\":\"your-domain.com\"}'"
-  echo
-  echo -e "  ${C_DIM}# Tunggu email (blocking)${C_NC}"
-  echo -e "  curl \"https://$web_url/api/inbox/test@your-domain.com/wait\" \\"
-  echo -e "    -H \"X-Email-API-Key: $api_key\""
-  echo
-  echo -e "  ${C_DIM}Dokumentasi lengkap:${C_NC} docs/API.md"
-  echo
-}
-
 main() {
   need_root; ensure_state
   local C_GREEN='\033[0;32m' C_RED='\033[0;31m' C_CYAN='\033[0;36m' C_YELLOW='\033[0;33m' C_BOLD='\033[1m' C_DIM='\033[2m' C_NC='\033[0m'
@@ -726,7 +684,6 @@ main() {
     echo -e "  ${C_CYAN}8${C_NC}) SETUP GUIDED ${C_DIM}(sekali jalan)${C_NC}"
     echo -e "  ${C_CYAN}9${C_NC}) AUTO SETUP ${C_DIM}(bertahap)${C_NC}"
     echo -e "  ${C_YELLOW}A${C_NC}) Kelola admin ${C_DIM}(buat/cek/reset)${C_NC}"
-    echo -e "  ${C_GREEN}K${C_NC}) Lihat API Key & cara pakai"
     echo
     echo -e "  ${C_DIM}─── Maintenance ───${C_NC}"
     echo -e "  ${C_RED}L1${C_NC}) Logout Wrangler"
@@ -744,7 +701,6 @@ main() {
       6) enable_routing_for_domain ;; 7) set_copy_destinations ;;
       8) guided_setup ;; 9) full_setup ;;
       A|a) manage_admin ;;
-      K|k) show_api_key ;;
       L1|l1) logout_wrangler ;;
       L2|l2) logout_tunnel ;;
       L3|l3) reset_all ;;
