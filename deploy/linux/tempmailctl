@@ -565,9 +565,77 @@ full_setup() {
 }
 
 guided_setup() {
-  local script=/opt/tempmail/setup.sh
-  [ -f "$script" ] || { echo "setup.sh tidak ditemukan di $script"; return; }
+  local script="/opt/tempmail/setup.sh"
+  [ -f "$script" ] || script="/root/tempmail-setup/setup.sh"
   bash "$script"
+}
+
+manage_admin() {
+  local app_env=/etc/tempmail/tempmail.env
+  local port
+  port=$(grep '^PORT=' "$app_env" | cut -d= -f2); port=${port:-8080}
+  local base="http://127.0.0.1:$port"
+
+  while true; do
+    echo
+    echo '=== Kelola Admin ==='
+    echo '1. Buat admin baru (hanya jika belum ada)'
+    echo '2. Cek user admin'
+    echo '3. Reset password admin'
+    echo '0. Kembali'
+    read -r -p 'Choose: ' c
+    case "$c" in
+      1)
+        read -r -p "Email admin: " ad_email
+        read -r -p "Password (min 6): " ad_pass
+        echo
+        curl -s -X POST "$base/api/setup" \
+          -H "Content-Type: application/json" \
+          -d "{\"email\":\"$ad_email\",\"password\":\"$ad_pass\"}" \
+          | python3 -c "import sys,json
+try:
+    d=json.load(sys.stdin)
+    if 'error' in d: print('❌',d['error'])
+    else: print('✅ Admin dibuat:',d.get('user',{}).get('email',''))
+except: print('Error: response tidak valid')"
+        ;;
+      2)
+        echo
+        curl -s "$base/api/auth/login" -X POST \
+          -H "Content-Type: application/json" \
+          -d '{"email":"check","password":"check"}' 2>/dev/null | \
+          python3 -c "import sys,json
+try:
+    d=json.load(sys.stdin)
+    if 'error' in d: print('Login ditolak (expected):',d['error'])
+    else: print('OK')
+except: print('Server merespon')" 2>/dev/null || echo "Server tidak merespons"
+        echo "Cek DB langsung:"
+        sqlite3 /opt/tempmail/data/tempmail.db "SELECT id,email,role FROM users;" 2>/dev/null || echo "Tidak bisa akses DB"
+        ;;
+      3)
+        echo
+        echo "⚠️  Reset password akan update user di database langsung."
+        read -r -p "Email admin: " ad_email
+        read -r -p "Password baru (min 6): " ad_pass
+        # Hash password with Python bcrypt, update DB
+        python3 -c "
+import bcrypt, sqlite3
+db = sqlite3.connect('/opt/tempmail/data/tempmail.db')
+hashed = bcrypt.hashpw('$ad_pass'.encode(), bcrypt.gensalt()).decode()
+try:
+    db.execute('UPDATE users SET password_hash=? WHERE email=?', (hashed, '$ad_email'))
+    db.commit()
+    print('✅ Password diupdate untuk', '$ad_email')
+except Exception as e:
+    print('❌ Gagal:', e)
+finally:
+    db.close()
+" 2>/dev/null || echo "❌ Butuh: pip install bcrypt"
+        ;;
+      0|*) break ;;
+    esac
+  done
 }
 
 main() {
@@ -585,6 +653,7 @@ main() {
     echo '7. Atur tujuan salinan email (default OFF)'
     echo '8. SETUP GUIDED sekali jalan (login wrangler + tunnel + worker + routing)'
     echo '9. AUTO SETUP bertahap (manual per langkah)'
+    echo 'A. Kelola admin (buat/cek/reset password)'
     echo '---'
     echo 'L1. Logout Wrangler (hapus credential)'
     echo 'L2. Logout CF Tunnel (hapus cert + service)'
@@ -599,6 +668,7 @@ main() {
       4) tunnel_login; create_tunnel ;; 5) deploy_worker ;;
       6) enable_routing_for_domain ;; 7) set_copy_destinations ;;
       8) guided_setup ;; 9) full_setup ;;
+      A|a) manage_admin ;;
       L1|l1) logout_wrangler ;;
       L2|l2) logout_tunnel ;;
       L3|l3) reset_all ;;
