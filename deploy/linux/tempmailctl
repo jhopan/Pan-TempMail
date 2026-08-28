@@ -567,10 +567,10 @@ dashboard() {
 
   # ── Dashboard ──
   echo
-  echo -e "  ${C_BOLD}╔════════════════════════════════════════════╗${C_NC}"
-  echo -e "  ${C_BOLD}║      ⚡ TempMail By JhopanStore            ║${C_NC}"
-  echo -e "  ${C_BOLD}║         ${C_CYAN}Credit JhopanStore${C_NC}            ${C_BOLD}║${C_NC}"
-  echo -e "  ${C_BOLD}╚════════════════════════════════════════════╝${C_NC}"
+  printf "  ${C_BOLD}╔══════════════════════════════════════════════╗${C_NC}\n"
+  printf "  ${C_BOLD}║      TempMail By JhopanStore                 ║${C_NC}\n"
+  printf "  ${C_BOLD}║        Credit JhopanStore                    ║${C_NC}\n"
+  printf "  ${C_BOLD}╚══════════════════════════════════════════════╝${C_NC}\n"
   echo
   printf "  ${C_DIM}%-16s${C_NC} %s / %s\n" "Platform" "$(. /etc/os-release; echo "$PRETTY_NAME")" "$(uname -m)"
   if [ "${service:-inactive}" = "active" ]; then
@@ -579,6 +579,7 @@ dashboard() {
     printf "  ${C_DIM}%-16s${C_NC} ${C_RED}%s${C_NC} | %s\n" "Service" "${service:-inactive}" "${rss:-0 MiB}"
   fi
   printf "  ${C_DIM}%-16s${C_NC} %s\n" "Admin" "$admin_email"
+  printf "  ${C_DIM}%-16s${C_NC} %s\n" "Password" "(bcrypt hashed in DB — use menu A to reset)"
   printf "  ${C_DIM}%-16s${C_NC} %s\n" "Domains" "$dom_val"
   printf "  ${C_DIM}%-16s${C_NC} ${C_CYAN}http://%s:%s/app/${C_NC}\n" "Web LAN" "$host" "$port"
   if [ -n "$web_url" ]; then
