@@ -61,17 +61,26 @@ Worker security:
 - Root access
 - Domain on Cloudflare (nameservers pointing to CF)
 
-### Step 1: Clone repo
+### Step 1: Download binary from GitHub Releases
+
+```bash
+wget https://github.com/jhopan/TempMailByJhopanstore/releases/download/v1.0.0/tempmail-linux-amd64 -O /tmp/tempmail
+chmod +x /tmp/tempmail
+```
+
+### Step 2: Clone repo (for scripts + worker)
 
 ```bash
 git clone https://github.com/jhopan/TempMailByJhopanstore.git
 cd TempMailByJhopanstore
 ```
 
-### Step 2: Install
+### Step 3: Install
 
 ```bash
 sudo bash deploy/linux/install.sh
+sudo cp /tmp/tempmail /opt/tempmail/tempmail
+sudo chown tempmail:tempmail /opt/tempmail/tempmail
 ```
 
 This installs:
@@ -82,7 +91,7 @@ This installs:
 - Control panel `tempmailctl` to `/usr/local/sbin/`
 - systemd service
 
-### Step 3: Configure
+### Step 4: Configure
 
 Edit `/etc/tempmail/tempmail.env`:
 
@@ -106,7 +115,7 @@ openssl rand -hex 32  # for JWT_SECRET
 openssl rand -hex 32  # for EMAIL_API_KEY
 ```
 
-### Step 4: Create admin user
+### Step 5: Create admin user
 
 ```bash
 curl -X POST http://127.0.0.1:8081/api/setup \
@@ -116,7 +125,7 @@ curl -X POST http://127.0.0.1:8081/api/setup \
 
 This only works once (when no users exist). After that, `/api/setup` is permanently locked.
 
-### Step 5: Cloudflare guided setup
+### Step 6: Cloudflare guided setup
 
 ```bash
 menutempmail
@@ -134,7 +143,7 @@ Flow:
 
 **Note:** If Email Routing enable fails with "Non-Cloudflare MX records exist", go to Cloudflare Dashboard → DNS → delete all MX records, then re-run step 6.
 
-### Step 6: Verify
+### Step 7: Verify
 
 ```bash
 menutempmail    # check dashboard — all green
@@ -142,17 +151,29 @@ menutempmail    # check dashboard — all green
 
 Open `https://your-subdomain.your-domain.com/app/` → login with admin credentials.
 
-## Build and deploy binary
+## Build and release
 
-Build on Windows (cross-compile), do not build on VPS:
+Binaries are built via **GitHub Actions** — no manual build needed.
+
+### Trigger a release
+
+```bash
+git tag v1.0.0
+git push origin v1.0.0
+```
+
+GitHub Actions automatically builds:
+- `tempmail-linux-amd64` — Linux x86_64 (Debian/Ubuntu/Armbian)
+- `tempmail-linux-arm64` — Linux ARM64 (Raspberry Pi 4/5)
+- `tempmail-windows-amd64.exe` — Windows x86_64
+
+Binaries are attached to the GitHub Release page: https://github.com/jhopan/TempMailByJhopanstore/releases
+
+### Build locally (testing only)
 
 ```bash
 cd receiver
 CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o tempmail-linux-amd64 .
-
-# Deploy
-scp tempmail-linux-amd64 your-host:/tmp/tn
-ssh your-host 'systemctl stop tempmail && cp /tmp/tn /opt/tempmail/tempmail && chown tempmail:tempmail /opt/tempmail/tempmail && chmod +x /opt/tempmail/tempmail && rm /tmp/tn && systemctl start tempmail'
 ```
 
 ## Host layout

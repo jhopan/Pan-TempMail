@@ -21,7 +21,8 @@ Read in order before changing code:
 
 ## Hard rules
 
-- Build Go binaries locally on Windows. Never build on VPS/Debian.
+- **Binaries are built via GitHub Actions** (`.github/workflows/release.yml`). Tag a release (`git tag v1.0.0 && git push origin v1.0.0`) to trigger build for Linux amd64, Linux arm64, and Windows amd64. Binaries are attached to the GitHub Release.
+- **Do not build Go binaries on VPS/Debian.** Build locally for testing only; use GitHub Releases for production deployment.
 - Use `CGO_ENABLED=0`; SQLite uses `modernc.org/sqlite`.
 - Never commit secrets, tokens, `.env`, databases, backups, cloudflared credentials, admin credentials, or built binaries.
 - Do not silently enable email copies or forwarding.
@@ -31,7 +32,24 @@ Read in order before changing code:
 - Do not expose `EMAIL_API_KEY` in any public API response (e.g. `/api/config`).
 - Web UI must require JWT login. Do not add guest mode or API-key-based web access.
 
-## Commands
+## Build & Release (GitHub Actions)
+
+```bash
+# Trigger a release — tag and push
+git tag v1.0.0
+git push origin v1.0.0
+
+# GitHub Actions automatically:
+#   1. Builds tempmail-linux-amd64 (Debian/Ubuntu x86_64)
+#   2. Builds tempmail-linux-arm64 (Raspberry Pi 4/5)
+#   3. Builds tempmail-windows-amd64.exe (Windows x86_64)
+#   4. Creates GitHub Release with binaries attached
+
+# Download from:
+#   https://github.com/jhopan/TempMailByJhopanstore/releases
+```
+
+### Manual build (local testing only)
 
 ```bash
 cd receiver
@@ -42,18 +60,49 @@ go vet ./...
 cp ../.env.example .env   # first time only
 go run .                  # UI at http://127.0.0.1:8080/app/
 
-# Windows local cross-builds
+# Windows local cross-builds (for testing, not for production)
 CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags="-s -w" -o tempmail-linux-arm64 .
 CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o tempmail-linux-amd64 .
+```
 
-# Validate non-Go code
+### Validate non-Go code
+
+```bash
 bash -n deploy/linux/install.sh
 bash -n deploy/linux/tempmailctl
 bash -n deploy/linux/setup.sh
 node --check cloudflare-worker/src/index.js
+```
 
-# Worker deploy (from cloudflare-worker/)
-npm run deploy            # wrangler deploy
+## Deploy to a new machine (using GitHub Release)
+
+```bash
+# 1. On the target machine, download binary from GitHub Releases
+wget https://github.com/jhopan/TempMailByJhopanstore/releases/download/v1.0.0/tempmail-linux-amd64 -O /tmp/tempmail
+chmod +x /tmp/tempmail
+
+# 2. Clone repo (for scripts + worker)
+git clone https://github.com/jhopan/TempMailByJhopanstore.git /tmp/tempmail-repo
+
+# 3. Install
+cd /tmp/tempmail-repo
+sudo bash deploy/linux/install.sh
+cp /tmp/tempmail /opt/tempmail/tempmail
+chown tempmail:tempmail /opt/tempmail/tempmail
+
+# 4. Configure
+sudo nano /etc/tempmail/tempmail.env  # set PORT, DOMAINS, secrets
+
+# 5. Start service
+sudo systemctl start tempmail
+
+# 6. Create admin
+curl -X POST http://127.0.0.1:8081/api/setup \
+  -H "Content-Type: application/json" \
+  -d '{"email":"your@email.com","password":"your-password"}'
+
+# 7. Cloudflare setup
+menutempmail → 8 (SETUP GUIDED)
 ```
 
 ## Code constraints
@@ -68,7 +117,7 @@ npm run deploy            # wrangler deploy
 - Web UI endpoints require JWT (`Authorization: Bearer <token>`). No API-key fallback for web.
 - `/api/config` returns only `domains` and `site_name`. Never return `api_key` or secrets.
 - Preserve raw recipient `to`; it identifies the target inbox.
-- Embedded frontend is vanilla HTML/JS, not React/Next.js.
+- Embedded frontend is vanilla HTML/JS (no CDN, no Tailwind, pure inline CSS), not React/Next.js.
 - Cache-bust JS changes with `?v=N` in `index.html` script tag.
 - Update PRD/architecture/runbook when API, deployment, menu, Cloudflare, or security behavior changes.
 
@@ -77,7 +126,7 @@ npm run deploy            # wrangler deploy
 - `frontend/` (Next.js), old `scripts/`, `config/` (maddy/nginx/systemd), `plan.md` are pre-rewrite legacy. Live UI is `receiver/web/static` via `go:embed`. Do not build or modify legacy dirs unless explicitly asked.
 - `deploy/armbian/` is legacy; use `deploy/linux/` for all Linux deployments.
 - No `*_test.go` files exist yet; `go test ./...` passes trivially. New tests go under `receiver/` packages per `docs/TDD.md`.
-- Built binaries (`receiver/tempmail.exe`, `tempmail-linux*`) sit in the repo dir but are gitignored — never commit them.
+- Built binaries are gitignored — never commit them. Use GitHub Releases instead.
 - SMTP test/local mode listens on `:2525` (not 25) per `docs/ARCHITECTURE.md`.
 - `receiver/handler` (auth) and `receiver/handlers` (inbox/email) are separate packages; `receiver/events` exists only to break the `api ↔ handlers` import cycle.
 - Cloudflare Tunnel buffers SSE responses. Config must include `disableChunkedEncoding: true` in `config.yml`.
@@ -90,8 +139,8 @@ npm run deploy            # wrangler deploy
 ## Cloudflare deployment facts
 
 ```text
-Worker name:    tempmailbyjhopanstore (fixed)
-Tunnel name:    tempmailbyjhopanstore (default, configurable)
+Worker name:    tempmailbyjhopanstore (fixed, hardcoded)
+Tunnel name:    tempmailbyjhopanstore (fixed, hardcoded)
 wrangler.toml:  workers_dev=false, preview_urls=false, no [vars] section
 Secrets:        TEMPMAIL_SERVER_URL, TEMPMAIL_API_KEY, FORWARD_LIST (via wrangler secret put)
 Tunnel config:  /etc/cloudflared/config.yml (disableChunkedEncoding: true for SSE)
@@ -111,16 +160,17 @@ DB:         /opt/tempmail/data/tempmail.db
 Port:       read from PORT in /etc/tempmail/tempmail.env (default 8081)
 ```
 
-### Deploy binary to target
+### Deploy binary to target (from GitHub Release)
 
 ```bash
-# Build on Windows
-cd receiver
-CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o tempmail-linux-amd64 .
+# Download from GitHub Releases
+wget https://github.com/jhopan/TempMailByJhopanstore/releases/download/v1.0.0/tempmail-linux-amd64 -O /tmp/tempmail
 
-# Deploy to target (use laptop-debian, fallback to laptop-debian1)
-scp tempmail-linux-amd64 laptop-debian:/tmp/tn
-ssh laptop-debian 'systemctl stop tempmail && cp /tmp/tn /opt/tempmail/tempmail && chown tempmail:tempmail /opt/tempmail/tempmail && chmod +x /opt/tempmail/tempmail && rm /tmp/tn && systemctl start tempmail'
+# Install
+sudo cp /tmp/tempmail /opt/tempmail/tempmail
+sudo chown tempmail:tempmail /opt/tempmail/tempmail
+sudo chmod +x /opt/tempmail/tempmail
+sudo systemctl restart tempmail
 ```
 
 After deploying binary:
