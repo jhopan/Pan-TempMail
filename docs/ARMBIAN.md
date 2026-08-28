@@ -125,7 +125,7 @@ sudo systemctl start tempmail
 
 ```text
 Architecture: ARM64 / aarch64
-LAN UI:       http://192.168.11.23:8080/app/
+LAN UI:       http://192.168.x.x:8080/app/
 ```
 
 This target is separate from VPS deployments.

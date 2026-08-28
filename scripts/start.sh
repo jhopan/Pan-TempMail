@@ -131,7 +131,7 @@ show_status() {
   local IP
   IP=$(hostname -I | awk '{print $1}')
   echo -e "  ${BOLD}Access:${NC} http://${IP}"
-  echo -e "  ${BOLD}Login:${NC}  jhopanstore@gmail.com / Jh0pan@St0re"
+  echo -e "  ${BOLD}Login:${NC}  your@email.com / your-password"
   echo ""
 }
 

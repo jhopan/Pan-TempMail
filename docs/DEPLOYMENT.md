@@ -44,8 +44,8 @@ Pilih opsi **1) Build & Start (full)**
 Buka browser: `http://your-server-ip`
 
 **Login default:**
-- Email: `jhopanstore@gmail.com`
-- Password: `Jh0pan@St0re`
+- Email: `your@email.com`
+- Password: `your-password`
 
 ⚠️ **Ganti password setelah login pertama!**
 

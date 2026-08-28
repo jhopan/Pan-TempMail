@@ -112,16 +112,16 @@ setup_database() {
 
   # Create admin user
   local HASH
-  HASH=$(python3 -c "import bcrypt; print(bcrypt.hashpw(b'Jh0pan@St0re', bcrypt.gensalt()).decode())")
+  HASH=$(python3 -c "import bcrypt; print(bcrypt.hashpw(b'your-password', bcrypt.gensalt()).decode())")
   sudo -u postgres psql -d tempmail -c \
-    "INSERT INTO users (email, password_hash, role) VALUES ('jhopanstore@gmail.com', '${HASH}', 'admin') ON CONFLICT (email) DO UPDATE SET password_hash = EXCLUDED.password_hash;" 2>/dev/null
+    "INSERT INTO users (email, password_hash, role) VALUES ('your@email.com', '${HASH}', 'admin') ON CONFLICT (email) DO UPDATE SET password_hash = EXCLUDED.password_hash;" 2>/dev/null
 
   # Grant table privileges
   sudo -u postgres psql -d tempmail -c "GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO tempmail;" 2>/dev/null
   sudo -u postgres psql -d tempmail -c "GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO tempmail;" 2>/dev/null
 
   log "Database setup complete"
-  echo "    Admin: jhopanstore@gmail.com / Jh0pan@St0re"
+  echo "    Admin: your@email.com / your-password"
 }
 
 # ------------------------------------------
@@ -217,7 +217,7 @@ EOF
 
   # --- Maddy ---
   cp "${PROJECT_DIR}/config/maddy/maddy.conf" /etc/maddy/maddy.conf
-  sed -i "s/renunganbot.qzz.io/${DOMAIN}/g" /etc/maddy/maddy.conf
+  sed -i "s/your-domain.com/${DOMAIN}/g" /etc/maddy/maddy.conf
   chown -R maddy:maddy /etc/maddy /var/lib/maddy
   log "Maddy configured"
 
@@ -333,6 +333,6 @@ echo -e "  Jalankan: ${CYAN}sudo bash scripts/start.sh${NC}"
 echo -e "  Atau:     ${CYAN}sudo bash scripts/menu.sh${NC}"
 echo ""
 echo -e "  Admin login:"
-echo -e "    Email:    ${YELLOW}jhopanstore@gmail.com${NC}"
-echo -e "    Password: ${YELLOW}Jh0pan@St0re${NC}"
+echo -e "    Email:    ${YELLOW}your@email.com${NC}"
+echo -e "    Password: ${YELLOW}your-password${NC}"
 echo ""

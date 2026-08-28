@@ -197,7 +197,7 @@ fi
 
 MX=$(dig +short MX "$DOMAIN" 2>/dev/null | head -1)
 echo ""
-if echo "$MX" | grep -q "mail.renunganbot"; then
+if echo "$MX" | grep -q "mail.your-domain"; then
     echo -e "${GREEN}MX record active:${NC} $MX"
 else
     echo -e "${YELLOW}MX record pending propagation${NC} [up to 24h]"

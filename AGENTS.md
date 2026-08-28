@@ -191,8 +191,8 @@ menutempmail
 ### SSH targets
 
 ```text
-Primary:   ssh laptop-debian   (192.168.10.21)
-Fallback:  ssh laptop-debian1  (192.168.1.57)
+Primary:   ssh laptop-debian   (192.168.x.x)
+Fallback:  ssh laptop-debian1  (192.168.x.x)
 Hostname:  jhopan (same physical machine, two network interfaces)
 ```
 

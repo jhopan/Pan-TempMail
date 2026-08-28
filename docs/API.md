@@ -5,7 +5,7 @@ Complete guide for using TempMail automation API.
 ## Base Info
 
 ```text
-Production URL:  https://tempmail.renunganbot.qzz.io
+Production URL:  https://your-domain.com
 Local URL:        http://127.0.0.1:8080 (or your PORT)
 ```
 
@@ -37,26 +37,26 @@ Content-Type: application/json
 X-Email-API-Key: your-api-key
 
 {
-  "domain": "renunganbot.qzz.io"
+  "domain": "your-domain.com"
 }
 ```
 
 **With custom username (you control the name):**
 ```json
 {
-  "username": "jhopan.cloudflare",
-  "domain": "renunganbot.qzz.io"
+  "username": "your-name",
+  "domain": "your-domain.com"
 }
 ```
 
 **Response:**
 ```json
 {
-  "email": "jhopan.cloudflare@renunganbot.qzz.io",
+  "email": "your-name@your-domain.com",
   "expires": "24h",
   "inbox_id": 12,
-  "sse_url": "/sse/jhopan.cloudflare@renunganbot.qzz.io?token=<JWT>",
-  "wait_url": "/inbox/jhopan.cloudflare@renunganbot.qzz.io/wait"
+  "sse_url": "/sse/your-name@your-domain.com?token=<JWT>",
+  "wait_url": "/inbox/your-name@your-domain.com/wait"
 }
 ```
 
@@ -70,16 +70,16 @@ X-Email-API-Key: your-api-key
 **Example (curl):**
 ```bash
 # Auto-generated name
-curl -s -X POST "https://tempmail.renunganbot.qzz.io/api/inbox" \
+curl -s -X POST "https://your-domain.com/api/inbox" \
   -H "Content-Type: application/json" \
   -H "X-Email-API-Key: your-api-key" \
-  -d '{"domain":"renunganbot.qzz.io"}'
+  -d '{"domain":"your-domain.com"}'
 
 # Custom username
-curl -s -X POST "https://tempmail.renunganbot.qzz.io/api/inbox" \
+curl -s -X POST "https://your-domain.com/api/inbox" \
   -H "Content-Type: application/json" \
   -H "X-Email-API-Key: your-api-key" \
-  -d '{"username":"jhopan.test","domain":"renunganbot.qzz.io"}'
+  -d '{"username":"your-name","domain":"your-domain.com"}'
 ```
 
 ---
@@ -117,13 +117,13 @@ X-Email-API-Key: your-api-key
 
 **Example:**
 ```bash
-curl -s "https://tempmail.renunganbot.qzz.io/api/inbox/jhopan.test@renunganbot.qzz.io/wait" \
+curl -s "https://your-domain.com/api/inbox/your-name@your-domain.com/wait" \
   -H "X-Email-API-Key: your-api-key"
 ```
 
 **With custom timeout (60 seconds):**
 ```bash
-curl -s "https://tempmail.renunganbot.qzz.io/api/inbox/jhopan.test@renunganbot.qzz.io/wait?timeout=60" \
+curl -s "https://your-domain.com/api/inbox/your-name@your-domain.com/wait?timeout=60" \
   -H "X-Email-API-Key: your-api-key"
 ```
 
@@ -173,7 +173,7 @@ X-Email-API-Key: your-api-key
 
 **Example:**
 ```bash
-curl -s "https://tempmail.renunganbot.qzz.io/api/inbox/jhopan.test@renunganbot.qzz.io" \
+curl -s "https://your-domain.com/api/inbox/your-name@your-domain.com" \
   -H "X-Email-API-Key: your-api-key"
 ```
 
@@ -205,7 +205,7 @@ X-Email-API-Key: your-api-key
 
 **Example:**
 ```bash
-curl -s "https://tempmail.renunganbot.qzz.io/api/message/8" \
+curl -s "https://your-domain.com/api/message/8" \
   -H "X-Email-API-Key: your-api-key"
 ```
 
@@ -225,7 +225,7 @@ X-Email-API-Key: your-api-key
 
 **Example:**
 ```bash
-curl -s -X DELETE "https://tempmail.renunganbot.qzz.io/api/message/8" \
+curl -s -X DELETE "https://your-domain.com/api/message/8" \
   -H "X-Email-API-Key: your-api-key"
 ```
 
@@ -245,7 +245,7 @@ X-Email-API-Key: your-api-key
 
 **Example:**
 ```bash
-curl -s -X DELETE "https://tempmail.renunganbot.qzz.io/api/inbox/jhopan.test@renunganbot.qzz.io" \
+curl -s -X DELETE "https://your-domain.com/api/inbox/your-name@your-domain.com" \
   -H "X-Email-API-Key: your-api-key"
 ```
 
@@ -275,7 +275,7 @@ X-Email-API-Key: your-api-key
 
 **Example:**
 ```bash
-curl -s "https://tempmail.renunganbot.qzz.io/api/message/8/attachments" \
+curl -s "https://your-domain.com/api/message/8/attachments" \
   -H "X-Email-API-Key: your-api-key"
 ```
 
@@ -295,7 +295,7 @@ X-Email-API-Key: your-api-key
 
 **Example:**
 ```bash
-curl -s -o document.pdf "https://tempmail.renunganbot.qzz.io/api/attachment/1" \
+curl -s -o document.pdf "https://your-domain.com/api/attachment/1" \
   -H "X-Email-API-Key: your-api-key"
 ```
 
@@ -313,7 +313,7 @@ GET /api/config
 **Response:**
 ```json
 {
-  "domains": ["renunganbot.qzz.io"],
+  "domains": ["your-domain.com"],
   "site_name": "TempMail By JhopanStore"
 }
 ```
@@ -350,9 +350,9 @@ Content-Type: application/json
 X-Email-API-Key: your-api-key
 
 {
-  "to": "jhopan.test@renunganbot.qzz.io",
+  "to": "your-name@your-domain.com",
   "from": "verify@cloudflare.com",
-  "raw": "From: verify@cloudflare.com\nTo: jhopan.test@...\nSubject: Verify\n\nBody text"
+  "raw": "From: verify@cloudflare.com\nTo: your-name@...\nSubject: Verify\n\nBody text"
 }
 ```
 
@@ -362,7 +362,7 @@ X-Email-API-Key: your-api-key
   "message_id": 8,
   "status": "received",
   "from": "verify@cloudflare.com",
-  "to": "jhopan.test@renunganbot.qzz.io",
+  "to": "your-name@your-domain.com",
   "subject": "Verify",
   "codes": ["192834"],
   "links": ["https://verify.cloudflare.com/confirm?token=abc123"],
@@ -388,14 +388,14 @@ X-Email-API-Key: your-api-key
 
 ```bash
 API_KEY="your-api-key"
-BASE="https://tempmail.renunganbot.qzz.io"
+BASE="https://your-domain.com"
 AUTH="X-Email-API-Key: $API_KEY"
 
 # 1. Create inbox with custom name
 EMAIL=$(curl -s -X POST "$BASE/api/inbox" \
   -H "Content-Type: application/json" \
   -H "$AUTH" \
-  -d '{"username":"jhopan.test","domain":"renunganbot.qzz.io"}' \
+  -d '{"username":"your-name","domain":"your-domain.com"}' \
   | grep -o '"email":"[^"]*"' | cut -d'"' -f4)
 
 echo "Inbox: $EMAIL"
@@ -423,10 +423,10 @@ curl -s -X DELETE "$BASE/api/inbox/$EMAIL" -H "$AUTH"
 import requests
 import json
 
-BASE = "https://tempmail.renunganbot.qzz.io"
+BASE = "https://your-domain.com"
 HEADERS = {"X-Email-API-Key": "your-api-key"}
 
-def create_inbox(username=None, domain="renunganbot.qzz.io"):
+def create_inbox(username=None, domain="your-domain.com"):
     """Create a temporary inbox. Returns email address."""
     payload = {"domain": domain}
     if username:
@@ -460,7 +460,7 @@ def delete_inbox(email):
 # === Full automation example ===
 
 # 1. Create inbox
-email = create_inbox(username="jhopan.test")
+email = create_inbox(username="your-name")
 print(f"Inbox ready: {email}")
 
 # 2. Register on target site with this email
@@ -488,10 +488,10 @@ print("Done")
 ### Node.js Example
 
 ```javascript
-const BASE = "https://tempmail.renunganbot.qzz.io";
+const BASE = "https://your-domain.com";
 const HEADERS = { "X-Email-API-Key": "your-api-key", "Content-Type": "application/json" };
 
-async function createInbox(username, domain = "renunganbot.qzz.io") {
+async function createInbox(username, domain = "your-domain.com") {
   const body = username ? { username, domain } : { domain };
   const r = await fetch(`${BASE}/api/inbox`, {
     method: "POST", headers: HEADERS,
@@ -509,7 +509,7 @@ async function waitForEmail(email, timeout = 60) {
 
 // Usage
 (async () => {
-  const email = await createInbox("jhopan.test");
+  const email = await createInbox("your-name");
   console.log(`Inbox: ${email}`);
 
   // Register on target site here...

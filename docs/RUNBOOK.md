@@ -8,7 +8,7 @@ Config:         /etc/tempmail/tempmail.env
 CF state:       /etc/tempmail/cloudflare-state.json
 Database:       /opt/tempmail/data/tempmail.db
 Backups:        /opt/tempmail/backups/
-UI LAN:         http://192.168.11.23:8080/app/
+UI LAN:         http://192.168.x.x:8080/app/
 Menu:           menutempmail
 ```
 

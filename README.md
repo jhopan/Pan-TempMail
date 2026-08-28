@@ -368,14 +368,14 @@ Dashboard + control panel:
         Credit JhopanStore
 Platform        : Debian GNU/Linux 13 (trixie) / x86_64
 Service         : active | 20.5 MiB
-Web LAN         : http://192.168.1.57:8081/app/
+Web LAN         : http://192.168.x.x:8081/app/
 Inbox           : 4 inbox | 4 message
 SQLite backup   : active
 --- Cloudflare profiles ---
 * wrangler-oauth: wrangler OAuth | Worker: deployed
 Domains:
-  renunganbot.qzz.io | profile=wrangler-oauth | routing=ON
-Tunnel: 0ee13ee3-... | host: tempmail.renunganbot.qzz.io
+  your-domain.com | profile=wrangler-oauth | routing=ON
+Tunnel: your-tunnel-id-... | host: tempmail.your-domain.com
 CF Tunnel      : active
 ```
 
