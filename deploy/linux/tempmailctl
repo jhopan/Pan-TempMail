@@ -420,8 +420,7 @@ create_tunnel() {
   local web_host list id tunnel_name
   read -r -p "Hostname web tunnel (contoh: mail.domain.com): " web_host
   [ -n "$web_host" ] || return
-  read -r -p "Nama tunnel [$TUNNEL_NAME]: " tunnel_name
-  tunnel_name=${tunnel_name:-$TUNNEL_NAME}
+  tunnel_name="$TUNNEL_NAME"
   [ -f /root/.cloudflared/cert.pem ] || { echo "Login Tunnel dulu."; return; }
   list=$(cloudflared tunnel list --output json)
   id=$(python3 - "$tunnel_name" "$list" <<'PY'

@@ -21,8 +21,7 @@ DOMAIN=$(printf '%s' "$DOMAIN" | sed -E 's#^https?://##; s#/+$##')
 WEB_HOST=${2:-tempmail.$DOMAIN}
 echo "Domain : $DOMAIN"
 echo "Web    : https://$WEB_HOST"
-read -r -p "Nama tunnel Cloudflare [tempmailbyjhopanstore]: " TUNNEL_INPUT
-TUNNEL_NAME=${TUNNEL_INPUT:-tempmailbyjhopanstore}
+TUNNEL_NAME=tempmailbyjhopanstore
 echo "Tunnel : $TUNNEL_NAME"
 
 STATE=/etc/tempmail/cloudflare-state.json
