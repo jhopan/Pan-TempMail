@@ -153,7 +153,7 @@ Wrangler token: /root/.wrangler/config/default.toml (device auth)
 ```text
 Binary:     /opt/tempmail/tempmail
 Worker dir:  /opt/tempmail/worker/ (wrangler.toml + src/)
-Config:     /etc/tempmail/tempmail.env (PORT, DOMAINS, JWT_SECRET, EMAIL_API_KEY)
+Config:      /etc/tempmail/tempmail.env (PORT, DOMAINS, JWT_SECRET, EMAIL_API_KEY, ADMIN_EMAIL, ADMIN_PASS)
 CF state:    /etc/tempmail/cloudflare-state.json
 Menu:        menutempmail (launches /usr/local/sbin/tempmailctl)
 DB:         /opt/tempmail/data/tempmail.db

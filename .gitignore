@@ -45,6 +45,11 @@ Thumbs.db
 .env.local
 .env.production
 
+# Legacy (pre-rewrite, not used)
+frontend/
+plan.md
+scripts/test-automation.py
+
 # Cloudflare credentials
 .wrangler/
 .cloudflared/
