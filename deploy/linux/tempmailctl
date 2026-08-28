@@ -546,13 +546,15 @@ dashboard() {
   local dom_count=$(python3 -c "import json;d=json.load(open('$STATE'));print(len(d.get('domains',{})))" 2>/dev/null || echo "0")
   local prof_count=$(python3 -c "import json;d=json.load(open('$STATE'));print(len(d.get('profiles',{})))" 2>/dev/null || echo "0")
   local active_prof=$(python3 -c "import json;d=json.load(open('$STATE'));print(d.get('active_profile','') or '')" 2>/dev/null || echo "")
-  # Wrangler login status
+  # Wrangler login status (check token file, not API call — faster + reliable)
   local wrangler_status="belum login"
-  if [ -f /root/.wrangler/config/default.toml ] || [ -f /root/.config/.wrangler/config/default.toml ]; then
-    if timeout 10 bash -c "cd '$WORKER_DIR' && CI=true npx wrangler whoami </dev/null 2>&1" 2>/dev/null | grep -q "You are logged in"; then
+  if [ -f /root/.wrangler/config/default.toml ]; then
+    if grep -q "oauth_token" /root/.wrangler/config/default.toml 2>/dev/null; then
       wrangler_status="✓ login"
-    else
-      wrangler_status="✗ token invalid"
+    fi
+  elif [ -f /root/.config/.wrangler/config/default.toml ]; then
+    if grep -q "oauth_token" /root/.config/.wrangler/config/default.toml 2>/dev/null; then
+      wrangler_status="✓ login"
     fi
   fi
   # CF Tunnel login status
@@ -565,10 +567,10 @@ dashboard() {
 
   # ── Dashboard ──
   echo
-  echo -e "  ${C_BOLD}╔════════════════════════════════════════════════╗${C_NC}"
-  echo -e "  ${C_BOLD}║              ⚡ TempMail By JhopanStore              ║${C_NC}"
-  echo -e "  ${C_BOLD}║              ${C_CYAN}     Credit JhopanStore${C_NC}              ${C_BOLD}║${C_NC}"
-  echo -e "  ${C_BOLD}╚════════════════════════════════════════════════╝${C_NC}"
+  echo -e "  ${C_BOLD}╔════════════════════════════════════════════╗${C_NC}"
+  echo -e "  ${C_BOLD}║      ⚡ TempMail By JhopanStore            ║${C_NC}"
+  echo -e "  ${C_BOLD}║         ${C_CYAN}Credit JhopanStore${C_NC}            ${C_BOLD}║${C_NC}"
+  echo -e "  ${C_BOLD}╚════════════════════════════════════════════╝${C_NC}"
   echo
   printf "  ${C_DIM}%-16s${C_NC} %s / %s\n" "Platform" "$(. /etc/os-release; echo "$PRETTY_NAME")" "$(uname -m)"
   if [ "${service:-inactive}" = "active" ]; then
@@ -590,7 +592,7 @@ dashboard() {
   else
     printf "  ${C_DIM}%-16s${C_NC} ${C_RED}%s${C_NC}\n" "SQLite Backup" "${backup:-inactive}"
   fi
-  printf "  ${C_DIM}%-16s${C_NC} ${C_GREEN}%s${C_NC}\n" "API Key" "${api_key:0:16}...${api_key: -8}"
+  printf "  ${C_DIM}%-16s${C_NC} ${C_GREEN}%s${C_NC}\n" "API Key" "$api_key"
   echo
   echo -e "  ${C_BOLD}─── Cloudflare (Tunnel) ───${C_NC}"
   if [ "${cf_cert_status#✓}" != "$cf_cert_status" ]; then
