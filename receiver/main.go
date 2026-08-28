@@ -21,6 +21,18 @@ func main() {
 	// Load .env if present (optional — env vars can be set directly)
 	_ = godotenv.Load()
 
+	// Startup banner
+	siteName := os.Getenv("SITE_NAME")
+	if siteName == "" {
+		siteName = "TempMail"
+	}
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8080"
+	}
+	banner := "\n==============================================\n  " + siteName + "\n        Credit JhopanStore\n==============================================\n"
+	log.Println(banner)
+
 	// Connect to database (SQLite by default, PostgreSQL if DB_DRIVER=postgres)
 	if err := database.Connect(); err != nil {
 		log.Fatalf("database: %v", err)
@@ -35,12 +47,6 @@ func main() {
 
 	// Setup HTTP API + static frontend
 	r := api.SetupRouter()
-
-	// Get HTTP port from env (default 8080)
-	port := os.Getenv("PORT")
-	if port == "" {
-		port = "8080"
-	}
 
 	// Graceful shutdown
 	srv := &http.Server{

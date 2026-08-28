@@ -229,16 +229,14 @@ function renderMessageList() {
   const container = document.getElementById('messageList');
   if (!container) return;
   if (messages.length === 0) {
-    container.innerHTML = '<div class="p-6 text-center text-gray-600"><div class="text-3xl mb-2">📭</div><div class="text-sm">No messages yet</div><div class="text-xs mt-1">Send an email to ' + currentEmail + '</div></div>';
+    container.innerHTML = '<div class="empty"><div class="ico">📭</div><div class="txt">No messages</div><div class="sub">Send an email to ' + currentEmail + '</div></div>';
     return;
   }
   container.innerHTML = messages.map(m => `
-    <div onclick="openMessage(${m.id})" class="rounded-lg p-3 cursor-pointer transition-all hover:bg-gray-900 border border-transparent">
-      <div class="flex items-center justify-between mb-1">
-        <span class="font-semibold text-sm truncate max-w-[200px]">${escapeHtml(m.sender)}</span>
-        <span class="text-gray-600 text-xs shrink-0">${formatTime(m.received_at)}</span>
-      </div>
-      <div class="text-gray-400 text-sm truncate">${escapeHtml(m.subject || '(no subject)')}</div>
+    <div onclick="openMessage(${m.id})" class="msg-item">
+      <span class="time">${formatTime(m.received_at)}</span>
+      <div class="from">${escapeHtml(m.sender)}</div>
+      <div class="subj">${escapeHtml(m.subject || '(no subject)')}</div>
     </div>
   `).join('');
 }
@@ -247,63 +245,41 @@ function renderMessage(msg, attachments = []) {
   const container = document.getElementById('messageView');
   if (!container) return;
   if (!msg) {
-    container.innerHTML = '<div class="flex-1 flex items-center justify-center text-gray-600"><div class="text-center"><div class="text-5xl mb-4">📧</div><div class="text-lg">Select an email to read</div></div></div>';
+    container.innerHTML = '<div class="placeholder"><div><div class="ico">📧</div><div class="txt">Select an email to read</div></div></div>';
     return;
   }
-  // Sanitize HTML: remove scripts and event handlers
   let html = msg.html_body || '';
   html = html.replace(/<script[\s\S]*?<\/script>/gi, '');
   html = html.replace(/on\w+="[^"]*"/gi, '');
   html = html.replace(/on\w+='[^']*'/gi, '');
   html = html.replace(/javascript:/gi, '');
 
-  // Show OTP codes if extracted
-  const codes = msg.codes || [];
-  const links = msg.links || [];
-  let codesHtml = '';
-  if (codes.length > 0) {
-    codesHtml = '<div class="bg-green-900/20 border border-green-800/50 rounded-lg p-3 mb-3"><div class="text-green-400 text-xs mb-1">🔑 Extracted Codes</div><div class="flex gap-2 flex-wrap">' + codes.map(c => `<span class="bg-green-900/40 text-green-300 px-3 py-1 rounded font-mono text-lg">${escapeHtml(c)}</span>`).join('') + '</div></div>';
-  }
-  let linksHtml = '';
-  if (links.length > 0) {
-    linksHtml = '<div class="bg-blue-900/20 border border-blue-800/50 rounded-lg p-3 mb-3"><div class="text-blue-400 text-xs mb-1">🔗 Verification Links</div><div class="flex flex-col gap-1">' + links.map(l => `<a href="${escapeHtml(l)}" target="_blank" class="text-blue-400 hover:text-blue-300 text-sm break-all">${escapeHtml(l)}</a>`).join('') + '</div></div>';
-  }
-
   const attHtml = attachments.length > 0 ? `
-    <div class="px-5 py-3 border-b border-gray-800 bg-gray-900/50">
-      <div class="text-gray-500 text-xs mb-2">${attachments.length} attachment(s)</div>
-      <div class="flex flex-wrap gap-2">
-        ${attachments.map(a => `<a href="/api/attachment/${a.id}" download class="flex items-center gap-2 bg-gray-800 hover:bg-gray-700 rounded-lg px-3 py-2 text-sm transition-colors border border-gray-700"><span>📎</span><div><div class="text-gray-200 text-xs font-medium truncate max-w-[150px]">${escapeHtml(a.filename)}</div><div class="text-gray-500 text-xs">${formatSize(a.size)}</div></div></a>`).join('')}
+    <div class="att-area">
+      <div class="lbl">${attachments.length} attachment(s)</div>
+      <div class="att-list">
+        ${attachments.map(a => `<a href="/api/attachment/${a.id}" download class="att-item"><span>📎</span>${escapeHtml(a.filename)} (${formatSize(a.size)})</a>`).join('')}
       </div>
     </div>` : '';
 
   const bodyHtml = html
-    ? '<iframe id="msgFrame" sandbox="allow-same-origin" class="w-full border-0 bg-gray-950" style="height:calc(100vh - 200px)"></iframe>'
-    : '<div class="p-5"><pre class="whitespace-pre-wrap font-sans text-gray-200 text-sm leading-relaxed">' + escapeHtml(msg.text_body || '') + '</pre></div>';
+    ? '<iframe id="msgFrame" sandbox="allow-same-origin" srcdoc=""></iframe>'
+    : '<pre>' + escapeHtml(msg.text_body || '') + '</pre>';
 
   container.innerHTML = `
-    <div class="p-5 border-b border-gray-800">
-      <div class="flex items-start justify-between">
-        <div>
-          <h2 class="text-xl font-bold mb-1">${escapeHtml(msg.subject || '(no subject)')}</h2>
-          <div class="text-gray-400 text-sm">From: ${escapeHtml(msg.sender)}</div>
-        </div>
-        <button onclick="deleteMessage(${msg.id})" class="bg-red-900/30 hover:bg-red-900/50 text-red-400 rounded-lg px-3 py-1.5 text-sm font-medium transition-colors border border-red-900/50">🗑️ Delete</button>
-      </div>
+    <div class="msg-head">
+      <button onclick="deleteMessage(${msg.id})" class="del-btn">🗑️ Delete</button>
+      <h2>${escapeHtml(msg.subject || '(no subject)')}</h2>
+      <div class="from">From: ${escapeHtml(msg.sender)}</div>
     </div>
     ${attHtml}
-    <div class="flex-1 overflow-y-auto">
-      ${bodyHtml}
-    </div>
+    <div class="msg-body">${bodyHtml}</div>
   `;
   if (html) {
     const iframe = document.getElementById('msgFrame');
     if (iframe) {
-      const doc = iframe.contentDocument;
-      const wrapped = '<!DOCTYPE html><html><head><meta charset="utf-8"><style>body{font-family:sans-serif;font-size:14px;line-height:1.6;color:#e2e8f0;background:#0a0a0f;margin:16px;word-wrap:break-word}img{max-width:100%;height:auto}a{color:#a78bfa}table{border-collapse:collapse}td,th{padding:4px}</style></head><body>' + html + '</body></html>';
-      doc.open();
-      doc.write(wrapped);
-      doc.close();
+      const wrapped = '<!DOCTYPE html><html><head><meta charset="utf-8"><style>body{font-family:sans-serif;font-size:14px;line-height:1.6;color:#e2e8f0;background:#0a0a0f;margin:16px;word-wrap:break-word}img{max-width:100%;height:auto}a{color:#8b5cf6}table{border-collapse:collapse}td,th{padding:4px}</style></head><body>' + html + '</body></html>';
+      iframe.srcdoc = wrapped;
     }
   }
 }
