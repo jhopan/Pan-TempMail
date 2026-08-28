@@ -11,14 +11,11 @@ No public port 25, Maddy, PostgreSQL, Node.js runtime, or Nginx is required in C
 ## Highlights
 
 - Single Go binary: HTTP API, embedded vanilla web UI, direct/local SMTP mode, SQLite.
-- Verified low-resource Debian deployment: TempMail process around 20MB RSS.
-- Web UI requires login (JWT). No guest mode — safe from public access.
-- Automation API with API key auth (`X-Email-API-Key` header): create inbox, wait for email, extract OTP/link.
-- Configurable naming rules: human-like Indonesian names (e.g. `langitbiru42`, `senjaindah17`), editable at runtime via admin API.
-- Automation scripts can send custom `username` in `POST /api/inbox` — server uses it directly, no naming rules needed.
-- Multiple temp-mail domains in one instance.
-- Domains can originate from multiple Cloudflare account profiles.
-- One Cloudflare Tunnel can route all profile Workers to one TempMail host.
+- Verified low-resource Debian deployment: ~20MB RSS.
+- **Web UI requires login** (JWT). No guest mode, no register button — safe from public access.
+- **Automation API** with `X-Email-API-Key` header: create inbox, wait for email, extract OTP/link.
+- **Naming rules**: human-like Indonesian names for web UI auto-generate. Automation scripts can send custom `username`.
+- Multiple domains and Cloudflare profiles in one instance.
 - Optional email copies: **OFF by default**.
 - Linux menu: `menutempmail`.
 
@@ -29,26 +26,34 @@ Email to any@domain.example
         ↓
 Cloudflare Email Routing catch-all
         ↓
-Worker for that Cloudflare profile
-        ├─ optional copies, only if explicitly configured
-        └─ HTTPS → shared Cloudflare Tunnel
-                       ↓
-             TempMail By JhopanStore
-             HTTP API + web UI + SQLite
+Worker tempmailbyjhopanstore (trigger: email event)
+        ├─ optional copies (only if FORWARD_LIST configured)
+        └─ POST /api/email/receive → Cloudflare Tunnel → Go server
+                                        ↓
+                                  Parse email
+                                  Extract OTP + links
+                                  Save to SQLite
+                                  Push SSE to web UI
 ```
 
-## Quick local run
+### Why Worker (not Pages)?
 
-```bash
-cd receiver
-cp ../.env.example .env
-# Set JWT_SECRET, EMAIL_API_KEY, and DOMAINS in .env.
-go run .
-```
+Cloudflare Email Routing can only deliver emails to:
+1. **Worker** (run code on email event) ← we use this
+2. Forward to another email address
+3. Drop
 
-Open: `http://127.0.0.1:8080/app/`
+There is no "POST to URL" option without a Worker. Pages cannot receive email events.
 
-## Linux deployment
+Our Worker is 72 lines of JS. It acts as a courier: reads raw email, POSTs to our Go server via tunnel, done. It stores nothing.
+
+Worker security:
+- `workers_dev = false` — no public `.workers.dev` URL
+- Only triggers on `email` event, not public HTTP
+- POST includes `X-Email-API-Key` for auth
+- No database, no storage
+
+## Fresh setup on a new machine
 
 ### Prerequisites
 
@@ -56,86 +61,163 @@ Open: `http://127.0.0.1:8080/app/`
 - Root access
 - Domain on Cloudflare (nameservers pointing to CF)
 
-### Setup
+### Step 1: Clone repo
 
 ```bash
-# On the target host after clone:
-sudo bash deploy/linux/install.sh
+git clone https://github.com/jhopan/TempMailByJhopanstore.git
+cd TempMailByJhopanstore
+```
 
-# Then run guided setup (interactive):
+### Step 2: Install
+
+```bash
+sudo bash deploy/linux/install.sh
+```
+
+This installs:
+- Go binary to `/opt/tempmail/tempmail`
+- Worker project to `/opt/tempmail/worker/`
+- Config template to `/etc/tempmail/tempmail.env`
+- Menu launcher `menutempmail` to `/usr/local/bin/`
+- Control panel `tempmailctl` to `/usr/local/sbin/`
+- systemd service
+
+### Step 3: Configure
+
+Edit `/etc/tempmail/tempmail.env`:
+
+```bash
+sudo nano /etc/tempmail/tempmail.env
+```
+
+Set these (all required):
+```ini
+PORT=8081
+DOMAINS=your-domain.com
+JWT_SECRET=    # generate: openssl rand -hex 32
+EMAIL_API_KEY= # generate: openssl rand -hex 32
+SITE_NAME=TempMail By JhopanStore
+GIN_MODE=release
+```
+
+**Generate secrets:**
+```bash
+openssl rand -hex 32  # for JWT_SECRET
+openssl rand -hex 32  # for EMAIL_API_KEY
+```
+
+### Step 4: Create admin user
+
+```bash
+curl -X POST http://127.0.0.1:8081/api/setup \
+  -H "Content-Type: application/json" \
+  -d '{"email":"your@email.com","password":"your-password"}'
+```
+
+This only works once (when no users exist). After that, `/api/setup` is permanently locked.
+
+### Step 5: Cloudflare guided setup
+
+```bash
 menutempmail
 # Choose option 8 — SETUP GUIDED
 ```
 
-Guided setup flow:
+Flow:
 1. Install dependencies (node, cloudflared, wrangler)
-2. Login Wrangler (device auth — buka URL + masukkan kode)
-3. Login Cloudflare Tunnel (pilih zona → cert.pem otomatis)
-4. Buat tunnel + DNS route (tanya nama tunnel, default: `tempmailbyjhopanstore`)
+2. Login Wrangler — device auth (buka URL + masukkan kode)
+3. Login Cloudflare Tunnel — pilih zona → cert.pem otomatis
+4. Buat tunnel + DNS (nama tunnel default: `tempmailbyjhopanstore`)
 5. Deploy worker `tempmailbyjhopanstore` + set secrets
 6. Aktifkan Email Routing + catch-all
 7. Simpan state + verify
 
-### Build locally, deploy binary
+**Note:** If Email Routing enable fails with "Non-Cloudflare MX records exist", go to Cloudflare Dashboard → DNS → delete all MX records, then re-run step 6.
+
+### Step 6: Verify
+
+```bash
+menutempmail    # check dashboard — all green
+```
+
+Open `https://your-subdomain.your-domain.com/app/` → login with admin credentials.
+
+## Build and deploy binary
 
 Build on Windows (cross-compile), do not build on VPS:
 
 ```bash
 cd receiver
 CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o tempmail-linux-amd64 .
+
+# Deploy
+scp tempmail-linux-amd64 your-host:/tmp/tn
+ssh your-host 'systemctl stop tempmail && cp /tmp/tn /opt/tempmail/tempmail && chown tempmail:tempmail /opt/tempmail/tempmail && chmod +x /opt/tempmail/tempmail && rm /tmp/tn && systemctl start tempmail'
 ```
 
-### Host layout
+## Host layout
 
 ```text
-/opt/tempmail/tempmail              Go binary
-/opt/tempmail/worker/               Wrangler project (wrangler.toml + src/)
-/etc/tempmail/tempmail.env          App config (PORT, DOMAINS, secrets)
-/etc/tempmail/cloudflare-state.json CF state (tunnel, worker, domains)
-/opt/tempmail/data/tempmail.db      SQLite database
-/usr/local/sbin/tempmailctl         Control panel binary
-/usr/local/bin/menutempmail         Menu launcher
+/opt/tempmail/tempmail               Go binary
+/opt/tempmail/worker/                Wrangler project (wrangler.toml + src/)
+/opt/tempmail/data/tempmail.db       SQLite database
+/etc/tempmail/tempmail.env            App config (PORT, DOMAINS, secrets)
+/etc/tempmail/cloudflare-state.json   CF state (tunnel, worker, domains)
+/etc/cloudflared/config.yml           Tunnel config (SSE: disableChunkedEncoding)
+/usr/local/sbin/tempmailctl           Control panel
+/usr/local/bin/menutempmail           Menu launcher
+/root/.wrangler/config/default.toml  Wrangler OAuth token (device auth)
+/root/.cloudflared/cert.pem           Tunnel certificate
 ```
 
-## Automation API
-
-All inbox/message endpoints accept `X-Email-API-Key` header for automation — no JWT login required for scripts. Web UI requires JWT login.
-
-### Auth model
+## Auth model
 
 | Access | Auth method | Use case |
 |---|---|---|
-| Web UI | JWT (`Authorization: Bearer <token>`) | Human using browser, must login |
-| Automation scripts | `X-Email-API-Key` header | Bots, CI/CD, scripts |
-| Worker ingestion | `X-Email-API-Key` header | Cloudflare Worker → server |
-| `/api/config` | None (public) | Domains + site name only (no secrets) |
+| Web UI | JWT login (email + password) | Human using browser — **must login** |
+| Automation scripts | `X-Email-API-Key` header | Bots, CI/CD, scripts — no login needed |
+| Worker ingestion | `X-Email-API-Key` header | Cloudflare Worker → Go server |
+| `/api/config` | None (public) | Returns domains + site_name only (no secrets) |
+
+### Security
+
+- Web UI: **login required**. No guest mode. No register button.
+- `/api/setup`: only works when 0 users exist. After first admin, permanently locked.
+- `/api/admin/users` (register): requires JWT admin.
+- `/api/config`: returns only `domains` + `site_name`. Never exposes `api_key`.
+- `workers_dev = false`: Worker not publicly accessible.
+- Email copies/forwarding: opt-in, OFF by default.
+
+## Automation API
+
+All inbox/message endpoints accept `X-Email-API-Key` header. No JWT login required for scripts.
+
+### What you need
+
+1. **API Key** — from `/etc/tempmail/tempmail.env` on the server (field `EMAIL_API_KEY`)
+2. **Base URL** — your tunnel URL (e.g. `https://tempmail.your-domain.com`)
 
 ### Endpoints
 
-| Endpoint | Method | Auth | Description |
-|---|---|---|---|
-| `/api/config` | GET | none | Domains + API key (for frontend) |
-| `/api/inbox` | POST | API key | Create inbox (auto-generate name from rules) |
-| `/api/inbox/{email}` | GET | API key | List messages in inbox |
-| `/api/inbox/{email}/wait` | GET | API key | Block until email arrives (returns message + codes + links) |
-| `/api/message/{id}` | GET | API key | Message detail (subject, body, codes, links) |
-| `/api/message/{id}` | DELETE | API key | Delete message |
-| `/api/message/{id}/attachments` | GET | API key | List attachments |
-| `/api/attachment/{id}` | GET | API key | Download attachment |
-| `/api/inbox/{email}` | DELETE | API key | Delete all messages in inbox |
-| `/api/email/receive` | POST | API key | Worker ingestion (raw RFC822 email) |
-| `/sse/{email}` | GET | JWT or api_key | Server-Sent Events (live inbox updates) |
-| `/health` | GET | none | Health check |
-| `/api/auth/login` | POST | none | JWT login (for admin panel) |
-| `/api/setup` | POST | none | Bootstrap first admin user |
-| `/api/admin/naming-rules` | GET | JWT admin | View naming rules |
-| `/api/admin/naming-rules` | PUT | JWT admin | Update naming rules |
+| Endpoint | Method | Description |
+|---|---|---|
+| `/api/inbox` | POST | Create inbox. `{"username":"custom","domain":"..."}` or `{"domain":"..."}` (auto name) |
+| `/api/inbox/{email}` | GET | List messages in inbox |
+| `/api/inbox/{email}/wait` | GET | Block until email arrives (returns message + codes + links) |
+| `/api/message/{id}` | GET | Message detail (subject, body, codes, links) |
+| `/api/message/{id}` | DELETE | Delete message |
+| `/api/message/{id}/attachments` | GET | List attachments |
+| `/api/attachment/{id}` | GET | Download attachment |
+| `/api/inbox/{email}` | DELETE | Delete all messages in inbox |
+| `/api/email/receive` | POST | Worker ingestion (internal, not for scripts) |
+| `/api/config` | GET | Domains + site_name (public, no secrets) |
+| `/health` | GET | Health check |
 
 ### Example: Full automation flow
 
 ```bash
 API_KEY="your-api-key"
-BASE="https://your-domain.com"
+BASE="https://tempmail.your-domain.com"
 
 # 1a. Create inbox with custom username (script controls name)
 curl -s -X POST "$BASE/api/inbox" \
@@ -169,7 +251,7 @@ curl -s "$BASE/api/inbox/jhopan.cloudflare@your-domain.com/wait" \
 ```python
 import requests
 
-BASE = "https://your-domain.com"
+BASE = "https://tempmail.your-domain.com"
 HEADERS = {"X-Email-API-Key": "your-api-key"}
 
 # 1. Create inbox with custom username (script controls name)
@@ -217,7 +299,7 @@ Example output: `langitbiru42`, `senjaindah17`, `bimautama63`
 # Login first to get JWT
 TOKEN=$(curl -s -X POST https://your-domain.com/api/auth/login \
   -H "Content-Type: application/json" \
-  -d '{"email":"admin@example.com","password":"yourpass"}' \
+  -d '{"email":"your@email.com","password":"your-password"}' \
   | python3 -c "import sys,json;print(json.load(sys.stdin)['token'])")
 
 # Update naming rules
@@ -235,41 +317,25 @@ curl -X PUT https://your-domain.com/api/admin/naming-rules \
   }'
 ```
 
-### Web UI behavior
-
-- **Login required:** all pages require JWT login. No guest mode. Opening `/app/` without login redirects to `/app/login.html`.
-- **Admin login:** use email + password set during `/api/setup` bootstrap.
-- After login: auto-generate email from naming rules, or type custom username + Enter.
-- **Admin panel:** login via `/app/login.html` for admin features (users, naming rules).
-
-### Security model
-
-- Web UI: JWT login required (no public access).
-- Automation: `X-Email-API-Key` header (for scripts only, not exposed in any API response).
-- `/api/config`: public but returns only domains + site_name (no secrets).
-- Worker: `workers_dev = false`, not publicly accessible.
-- Email copies/forwarding: opt-in, OFF by default.
-
 ## Cloudflare setup
 
 ### Worker
 
-Worker name: `tempmailbyjhopanstore` (fixed).
+Worker name: `tempmailbyjhopanstore` (fixed in `cloudflare-worker/wrangler.toml`).
 
-Worker config (`cloudflare-worker/wrangler.toml`):
-- `workers_dev = false` (no public workers.dev URL)
+Config:
+- `workers_dev = false` — no public URL
 - `preview_urls = false`
 - Secrets set via `wrangler secret put`: `TEMPMAIL_SERVER_URL`, `TEMPMAIL_API_KEY`, `FORWARD_LIST`
 
 ### Email Routing
 
 - Catch-all rule: `*@domain → worker:tempmailbyjhopanstore`
-- Enabled via `wrangler email routing enable` or Cloudflare API
-- MX records must be Cloudflare-managed (delete any existing non-CF MX records first)
+- MX records must be Cloudflare-managed (delete existing non-CF MX records first)
 
 ### Tunnel
 
-- Tunnel name: `tempmailbyjhopanstore` (default, configurable)
+- Tunnel name: `tempmailbyjhopanstore` (default, configurable during setup)
 - Config: `/etc/cloudflared/config.yml` with `disableChunkedEncoding: true` for SSE support
 
 ## menutempmail
@@ -294,7 +360,7 @@ CF Tunnel      : active
 
 Menu options:
 1-2: Manage CF profiles + domains
-3-4: Login Wrangler + CF Tunnel (device auth)
+3-4: Login Wrangler (device auth) + CF Tunnel
 5-6: Deploy worker + email routing
 7: Email copies config
 8: SETUP GUIDED (one-shot all steps)
@@ -302,14 +368,15 @@ Menu options:
 L1-L4: Logout/reset/delete worker
 10: Refresh status
 
-## Security
+## Quick local run (development)
 
-- `JWT_SECRET` and `EMAIL_API_KEY` are mandatory; no hardcoded fallback.
-- Worker ingress uses `X-Email-API-Key` header.
-- `workers_dev = false` — Worker not publicly accessible.
-- Keep Cloudflare API tokens, Worker secrets, DB, and admin credentials outside Git.
-- Keep app port private/LAN-only unless accessed through Cloudflare Tunnel.
-- Email forwarding/copies are opt-in (OFF by default).
+```bash
+cd receiver
+cp ../.env.example .env
+# Set JWT_SECRET, EMAIL_API_KEY, and DOMAINS in .env
+go run .
+# UI at http://127.0.0.1:8080/app/
+```
 
 ## Development
 
@@ -318,6 +385,18 @@ cd receiver
 go test ./...
 go vet ./...
 ```
+
+## Security
+
+- `JWT_SECRET` and `EMAIL_API_KEY` are mandatory; no hardcoded fallback.
+- Worker ingress uses `X-Email-API-Key` header.
+- `workers_dev = false` — Worker not publicly accessible.
+- Web UI requires login — no guest mode, no register button.
+- `/api/setup` locked after first admin created.
+- `/api/config` returns no secrets.
+- Keep Cloudflare tokens, Worker secrets, DB, and admin credentials outside Git.
+- Keep app port private/LAN-only unless accessed through Cloudflare Tunnel.
+- Email forwarding/copies are opt-in (OFF by default).
 
 ## Docs
 
