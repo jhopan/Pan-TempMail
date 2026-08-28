@@ -525,7 +525,7 @@ PY
 
 dashboard() {
   local service rss inboxes messages backup tunnel copy
-  local host port api_key admin_email web_url cf_state
+  local host port api_key admin_email web_url
   local C_GREEN='\033[0;32m' C_RED='\033[0;31m' C_CYAN='\033[0;36m' C_YELLOW='\033[0;33m' C_BOLD='\033[1m' C_DIM='\033[2m' C_NC='\033[0m'
   service=$(systemctl is-active tempmail 2>/dev/null || true)
   rss=$(ps -o rss= -C tempmail 2>/dev/null | awk 'NR==1 {printf "%.1f MiB",$1/1024}')
@@ -536,12 +536,32 @@ dashboard() {
   copy=$(state_get_copy); [ -n "$copy" ] || copy=OFF
   port=$(app_port)
   host=$(hostname -I | awk '{print $1}')
+  api_key=$(grep '^EMAIL_API_KEY=' "$APP_ENV" 2>/dev/null | cut -d= -f2)
   admin_email=$(sqlite3 "$APP/data/tempmail.db" 'SELECT email FROM users WHERE role="admin" LIMIT 1;' 2>/dev/null || echo "belum")
   web_url=$(python3 -c "import json;d=json.load(open('$STATE'));print(d.get('tunnel',{}).get('web_host',''))" 2>/dev/null || echo "")
-  local dom_val=$(python3 -c "import json;d=json.load(open('$STATE'));doms=[k for k in d.get('domains',{})];print(', '.join(doms) if doms else 'belum ada')" 2>/dev/null || echo "belum ada")
+  local dom_val=$(python3 -c "import json;d=json.load(open('$STATE'));doms=list(d.get('domains',{}).keys());print(', '.join(doms) if doms else 'belum ada')" 2>/dev/null || echo "belum ada")
   local wrkr=$(python3 -c "import json;d=json.load(open('$STATE'));ap=d.get('active_profile','');p=d.get('profiles',{}).get(ap,{});print('✓ deployed' if p.get('worker_deployed') else '✗ belum')" 2>/dev/null || echo "✗ belum")
   local tun_name=$(python3 -c "import json;d=json.load(open('$STATE'));print(d.get('tunnel',{}).get('name','') or '')" 2>/dev/null || echo "")
   local tun_id=$(python3 -c "import json;d=json.load(open('$STATE'));print(d.get('tunnel',{}).get('id','') or '')" 2>/dev/null || echo "")
+  local dom_count=$(python3 -c "import json;d=json.load(open('$STATE'));print(len(d.get('domains',{})))" 2>/dev/null || echo "0")
+  local prof_count=$(python3 -c "import json;d=json.load(open('$STATE'));print(len(d.get('profiles',{})))" 2>/dev/null || echo "0")
+  local active_prof=$(python3 -c "import json;d=json.load(open('$STATE'));print(d.get('active_profile','') or '')" 2>/dev/null || echo "")
+  # Wrangler login status
+  local wrangler_status="belum login"
+  if [ -f /root/.wrangler/config/default.toml ] || [ -f /root/.config/.wrangler/config/default.toml ]; then
+    if timeout 10 bash -c "cd '$WORKER_DIR' && CI=true npx wrangler whoami </dev/null 2>&1" 2>/dev/null | grep -q "You are logged in"; then
+      wrangler_status="✓ login"
+    else
+      wrangler_status="✗ token invalid"
+    fi
+  fi
+  # CF Tunnel login status
+  local cf_cert_status="belum login"
+  [ -f /root/.cloudflared/cert.pem ] && cf_cert_status="✓ login (cert.pem)"
+  # Email routing status
+  local routing_status="OFF"
+  python3 -c "import json;d=json.load(open('$STATE'));doms=d.get('domains',{});routing_status='ON' if any(v.get('routing') for v in doms.values()) else 'OFF'" 2>/dev/null || true
+  local routing_on=$(python3 -c "import json;d=json.load(open('$STATE'));doms=d.get('domains',{});print('ON' if any(v.get('routing') for v in doms.values()) else 'OFF')" 2>/dev/null || echo "OFF")
 
   # ── Dashboard ──
   echo
@@ -570,17 +590,37 @@ dashboard() {
   else
     printf "  ${C_DIM}%-16s${C_NC} ${C_RED}%s${C_NC}\n" "SQLite Backup" "${backup:-inactive}"
   fi
+  printf "  ${C_DIM}%-16s${C_NC} ${C_GREEN}%s${C_NC}\n" "API Key" "${api_key:0:16}...${api_key: -8}"
   echo
-  echo -e "  ${C_BOLD}─── Cloudflare ───${C_NC}"
-  printf "  ${C_DIM}%-16s${C_NC} %s\n" "Worker" "$wrkr"
+  echo -e "  ${C_BOLD}─── Cloudflare (Tunnel) ───${C_NC}"
+  if [ "${cf_cert_status#✓}" != "$cf_cert_status" ]; then
+    printf "  ${C_DIM}%-16s${C_NC} ${C_GREEN}%s${C_NC}\n" "Login" "$cf_cert_status"
+  else
+    printf "  ${C_DIM}%-16s${C_NC} ${C_RED}%s${C_NC}\n" "Login" "$cf_cert_status"
+  fi
   printf "  ${C_DIM}%-16s${C_NC} %s\n" "Tunnel Name" "${tun_name:-belum dibuat}"
   printf "  ${C_DIM}%-16s${C_NC} %s\n" "Tunnel ID" "${tun_id:-belum dibuat}"
   if [ "${tunnel:-not configured}" = "active" ]; then
-    printf "  ${C_DIM}%-16s${C_NC} ${C_GREEN}%s${C_NC}\n" "CF Tunnel" "${tunnel:-not configured}"
+    printf "  ${C_DIM}%-16s${C_NC} ${C_GREEN}%s${C_NC}\n" "Tunnel Service" "${tunnel:-not configured}"
   else
-    printf "  ${C_DIM}%-16s${C_NC} ${C_RED}%s${C_NC}\n" "CF Tunnel" "${tunnel:-not configured}"
+    printf "  ${C_DIM}%-16s${C_NC} ${C_RED}%s${C_NC}\n" "Tunnel Service" "${tunnel:-not configured}"
+  fi
+  if [ "$routing_on" = "ON" ]; then
+    printf "  ${C_DIM}%-16s${C_NC} ${C_GREEN}%s${C_NC}\n" "Email Routing" "$routing_on"
+  else
+    printf "  ${C_DIM}%-16s${C_NC} ${C_RED}%s${C_NC}\n" "Email Routing" "$routing_on"
   fi
   printf "  ${C_DIM}%-16s${C_NC} %s\n" "Salinan Email" "$copy"
+  echo
+  echo -e "  ${C_BOLD}─── Wrangler (Worker) ───${C_NC}"
+  if [ "${wrangler_status#✓}" != "$wrangler_status" ]; then
+    printf "  ${C_DIM}%-16s${C_NC} ${C_GREEN}%s${C_NC}\n" "Login" "$wrangler_status"
+  else
+    printf "  ${C_DIM}%-16s${C_NC} ${C_RED}%s${C_NC}\n" "Login" "$wrangler_status"
+  fi
+  printf "  ${C_DIM}%-16s${C_NC} %s\n" "Active Profile" "${active_prof:-belum ada}"
+  printf "  ${C_DIM}%-16s${C_NC} %s\n" "Worker" "$wrkr"
+  printf "  ${C_DIM}%-16s${C_NC} %s\n" "Profiles" "$prof_count profile"
   echo
 }
 
