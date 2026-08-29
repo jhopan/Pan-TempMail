@@ -287,6 +287,110 @@ Menu:
 
 ---
 
+## 🌐 Multi-Domain Support
+
+TempMail supports **multiple domains** in one instance. Each domain can be on the **same Cloudflare account** or **different accounts**.
+
+### How domains are grouped
+
+```text
+Domain A (account CF-A):
+  Email → x@domain-a.com → CF Routing (A) → Worker A → Tunnel → Server
+  Web   → https://tempmail.domain-a.com/app/
+
+Domain B (account CF-B):
+  Email → y@domain-b.com → CF Routing (B) → Worker B → Tunnel → Server
+  Web   → https://tempmail.domain-a.com/app/  ← web stays on A (recommended)
+```
+
+### Adding a second domain — SOLVED
+
+When adding a **second domain**, you do **NOT** need to go through the full `menutempmail → 8` setup again. Most steps auto-skip. Here's the exact flow:
+
+#### Case 1: Domain B on the SAME Cloudflare account
+
+```bash
+menutempmail → 2  (add domain B)
+            → 6  (enable Email Routing for B)
+            → 10 (refresh)
+```
+Only **3 steps**. No login, no tunnel, no worker re-deploy needed. Email Routing for B is enabled automatically; everything else already exists.
+
+```text
+== [2/7] Login Wrangler       == → Skip (already logged in)
+== [3/7] Login CF Tunnel      == → Skip (cert.pem exists)
+== [4/7] Buat tunnel + DNS    == → Skip (tunnel exists)
+== [5/7] Deploy worker        == → Skip (worker deployed)
+== [6/7] Email Routing (B)    == → ✅ NEW — enable catch-all *@domain-b.com
+```
+
+#### Case 2: Domain B on a DIFFERENT Cloudflare account
+
+This requires a **separate Worker** (each CF account has its own worker). But the **Tunnel stays shared** — no new tunnel needed for email.
+
+```bash
+# Step 1 — add domain B to config
+sudo nano /etc/tempmail/tempmail.env
+#   DOMAINS=domain-a.com,domain-b.com
+sudo systemctl restart tempmail
+
+# Step 2 — login wrangler with account B (replaces token with acct B)
+menutempmail → 3 (Login Wrangler)
+#   open link → authorize with account B
+
+# Step 3 — save account B as a CF profile
+menutempmail → 1 (Kelola akun Cloudflare)
+#   add profile → label "CF B" + account ID of B
+
+# Step 4 — register domain B under profile B
+menutempmail → 2 (Kelola domain)
+#   add domain B → attach to profile "CF B"
+
+# Step 5 — deploy worker to account B
+menutempmail → 5 (Deploy worker)
+#   select profile B → wrangler deploy worker in account B
+
+# Step 6 — enable Email Routing for domain B
+menutempmail → 6 (Aktifkan Email Routing)
+#   select domain B → enable catch-all → worker in account B
+
+# Step 7 — verify
+menutempmail → 10 (Refresh)
+```
+
+### What you must NOT redo for domain B
+
+| Component | Reuse? | Why |
+|---|---|---|
+| Cloudflare Tunnel | ✅ **Reuse** | One tunnel serves all domains' email to the server |
+| `cloudflared tunnel login` | ❌ No | `cert.pem` already exists |
+| Tunnel created | ❌ No | Existing tunnel is enough |
+| Worker name | ✅ Same | `tempmailbyjhopanstore` (per account) |
+| Web UI hostname | ⚠️ Optional | Only if you want a separate web URL for domain B |
+
+### Email-only vs Web for domain B
+
+**Email-only (recommended):** domain B just receives email, web stays on domain A.
+```text
+Email → x@domain-b.com → Worker B → Tunnel A → Server → inbox
+Web   → tempmail.domain-a.com/app/   (unchanged)
+```
+
+**Web on domain B:** requires a new tunnel in account B + DNS route. Uncommon — only if you want a separate admin URL per domain.
+
+### The KEY difference: Profile vs Login vs Worker
+
+| Concept | What | Notes |
+|---|---|---|
+| **Login (Wrangler)** | Active OAuth token | 1 token = 1 account. Last login is active. |
+| **Profile (CF A / CF B)** | Saved account data (label, account ID) | Multiple allowed, never expire |
+| **Active profile** | Which profile is used for deploy/routing | Switch anytime |
+| **Worker** | Per-account script `tempmailbyjhopanstore` | Deployed in host account |
+
+Because Wrangler stores only **one** OAuth token at a time, switching accounts requires `menutempmail → 3` again. For permanent multi-account without re-login, **API Token per profile** is the way (see roadmap).
+
+---
+
 ## 📦 Build & Release
 
 Binaries built via **GitHub Actions** — no manual build needed.
