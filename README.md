@@ -349,11 +349,7 @@ go vet ./...
 ## 📚 Docs
 
 - [`docs/API.md`](docs/API.md) — Full API documentation with examples
-- [`AGENTS.md`](AGENTS.md) — Repository rules and developer instructions
-- [`docs/PRD.md`](docs/PRD.md) — Product requirements
-- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — System design
-- [`docs/SDD.md`](docs/SDD.md) — Spec-driven change process
-- [`docs/RUNBOOK.md`](docs/RUNBOOK.md) — Deploy, operation, recovery
+- [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) — Deployment guide
 
 ---
 

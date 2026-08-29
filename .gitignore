@@ -50,6 +50,15 @@ frontend/
 plan.md
 scripts/test-automation.py
 
+# Internal docs (not for public repo)
+AGENTS.md
+docs/PRD.md
+docs/SDD.md
+docs/TDD.md
+docs/ARMBIAN.md
+docs/RUNBOOK.md
+docs/ARCHITECTURE.md
+
 # Cloudflare credentials
 .wrangler/
 .cloudflared/
