@@ -425,32 +425,43 @@ create_tunnel() {
   list=$(cloudflared tunnel list --output json)
   id=$(python3 - "$tunnel_name" "$list" <<'PY'
 import json,sys
-for item in json.loads(sys.argv[2]):
-  if item['name']==sys.argv[1]: print(item['id']); break
+try:
+  data=json.loads(sys.argv[2])
+  if not data: sys.exit(0)
+  for item in data:
+    if item['name']==sys.argv[1]: print(item['id']); break
+except: pass
 PY
 )
   if [ -z "$id" ]; then
     cloudflared tunnel create "$tunnel_name"
-    list=$(cloudflared tunnel list --output json)
+    list=$(cloudflared tunnel list --output json 2>/dev/null || echo "[]")
     id=$(python3 - "$tunnel_name" "$list" <<'PY'
 import json,sys
-for item in json.loads(sys.argv[2]):
-  if item['name']==sys.argv[1]: print(item['id']); break
+try:
+  data=json.loads(sys.argv[2])
+  if not data: sys.exit(0)
+  for item in data:
+    if item['name']==sys.argv[1]: print(item['id']); break
+except: pass
 PY
 )
   fi
   [ -n "$id" ] || { echo "Tunnel gagal dibuat."; return; }
   cat >/etc/cloudflared/config.yml <<EOF
- tunnel: $id
- credentials-file: /root/.cloudflared/$id.json
- ingress:
-   - hostname: $web_host
-     service: http://127.0.0.1:$(app_port)
-   - service: http_status:404
+tunnel: $id
+credentials-file: /root/.cloudflared/$id.json
+ingress:
+  - hostname: $web_host
+    service: http://127.0.0.1:$(app_port)
+    originRequest:
+      disableChunkedEncoding: true
+  - service: http_status:404
 EOF
   sed -i 's/^ //' /etc/cloudflared/config.yml
-  cloudflared tunnel route dns "$tunnel_name" "$web_host"
-  cloudflared service install
+  cloudflared tunnel route dns --overwrite-dns "$tunnel_name" "$web_host" 2>/dev/null || \
+    cloudflared tunnel route dns "$tunnel_name" "$web_host" 2>/dev/null || true
+  cloudflared service install 2>/dev/null || true
   systemctl enable --now cloudflared
   CF_TUNNEL_ID="$id" CF_TUNNEL_NAME="$tunnel_name" CF_WEB_HOST="$web_host" python3 - "$STATE" <<'PY'
 import json,os,sys

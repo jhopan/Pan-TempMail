@@ -131,15 +131,25 @@ fi
 
 echo
 echo "== [4/7] Buat tunnel + ingress + DNS route =="
+# Cari tunnel yang sudah ada (handle None/list kosong)
 TUNNEL_ID=$(cloudflared tunnel list --output json 2>/dev/null | python3 -c 'import json,sys
-for t in json.load(sys.stdin):
-    if t["name"]=="'"$TUNNEL_NAME"'": print(t["id"]); break' || true)
+try:
+    data=json.load(sys.stdin)
+    if not data: sys.exit(0)
+    for t in data:
+        if t.get("name")=="'"$TUNNEL_NAME"'": print(t["id"]); break
+except: pass' || true)
 if [ -z "${TUNNEL_ID:-}" ]; then
   cloudflared tunnel create "$TUNNEL_NAME"
-  TUNNEL_ID=$(cloudflared tunnel list --output json | python3 -c 'import json,sys
-for t in json.load(sys.stdin):
-    if t["name"]=="'"$TUNNEL_NAME"'": print(t["id"]); break')
+  TUNNEL_ID=$(cloudflared tunnel list --output json 2>/dev/null | python3 -c 'import json,sys
+try:
+    data=json.load(sys.stdin)
+    if not data: sys.exit(0)
+    for t in data:
+        if t.get("name")=="'"$TUNNEL_NAME"'": print(t["id"]); break
+except: pass' || true)
 fi
+[ -n "$TUNNEL_ID" ] || { echo "Gagal membuat/mencari tunnel."; exit 1; }
 APP_PORT=$(grep '^PORT=' "$APP_ENV" | cut -d= -f2); APP_PORT=${APP_PORT:-8080}
 mkdir -p /etc/cloudflared
 cat >/etc/cloudflared/config.yml <<EOF
@@ -148,9 +158,13 @@ credentials-file: /root/.cloudflared/$TUNNEL_ID.json
 ingress:
   - hostname: $WEB_HOST
     service: http://127.0.0.1:$APP_PORT
+    originRequest:
+      disableChunkedEncoding: true
   - service: http_status:404
 EOF
-cloudflared tunnel route dns "$TUNNEL_NAME" "$WEB_HOST"
+# DNS route: pakai --overwrite-dns biar tidak error kalau CNAME lama masih ada
+cloudflared tunnel route dns --overwrite-dns "$TUNNEL_NAME" "$WEB_HOST" 2>/dev/null || \
+  cloudflared tunnel route dns "$TUNNEL_NAME" "$WEB_HOST" 2>/dev/null || true
 cloudflared service install 2>/dev/null || true
 systemctl enable --now cloudflared
 echo "Tunnel $TUNNEL_NAME aktif -> https://$WEB_HOST"
