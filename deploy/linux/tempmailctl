@@ -659,6 +659,254 @@ guided_setup() {
   bash "$script"
 }
 
+doctor() {
+  local C_GREEN='\033[0;32m' C_RED='\033[0;31m' C_CYAN='\033[0;36m' C_YELLOW='\033[0;33m' C_BOLD='\033[1m' C_DIM='\033[2m' C_NC='\033[0m'
+  local pass=0 fail=0
+  local port app_env api_key
+  app_env="$APP_ENV"
+  port=$(app_port)
+  api_key=$(grep '^EMAIL_API_KEY=' "$app_env" 2>/dev/null | cut -d= -f2)
+
+  echo
+  echo -e "  ${C_BOLD}═══ TempMail Doctor — Health Check ═══${C_NC}"
+  echo
+
+  # 1. Binary exists
+  if [ -f "$APP/tempmail" ]; then
+    echo -e "  ${C_GREEN}✓${C_NC} Binary            : $APP/tempmail"
+    pass=$((pass+1))
+  else
+    echo -e "  ${C_RED}✗${C_NC} Binary            : TIDAK ADA di $APP/tempmail"
+    fail=$((fail+1))
+  fi
+
+  # 2. Service active
+  if systemctl is-active --quiet tempmail; then
+    echo -e "  ${C_GREEN}✓${C_NC} Service           : active"
+    pass=$((pass+1))
+  else
+    echo -e "  ${C_RED}✗${C_NC} Service           : inactive — jalankan: systemctl start tempmail"
+    fail=$((fail+1))
+  fi
+
+  # 3. Config file
+  if [ -f "$app_env" ]; then
+    echo -e "  ${C_GREEN}✓${C_NC} Config            : $app_env"
+    pass=$((pass+1))
+  else
+    echo -e "  ${C_RED}✗${C_NC} Config            : TIDAK ADA — $app_env"
+    fail=$((fail+1))
+  fi
+
+  # 4. JWT_SECRET set
+  if grep -q '^JWT_SECRET=.' "$app_env" 2>/dev/null; then
+    echo -e "  ${C_GREEN}✓${C_NC} JWT_SECRET        : set"
+    pass=$((pass+1))
+  else
+    echo -e "  ${C_RED}✗${C_NC} JWT_SECRET        : kosong — generate: openssl rand -hex 32"
+    fail=$((fail+1))
+  fi
+
+  # 5. EMAIL_API_KEY set
+  if grep -q '^EMAIL_API_KEY=.' "$app_env" 2>/dev/null; then
+    echo -e "  ${C_GREEN}✓${C_NC} EMAIL_API_KEY     : set"
+    pass=$((pass+1))
+  else
+    echo -e "  ${C_RED}✗${C_NC} EMAIL_API_KEY     : kosong — generate: openssl rand -hex 32"
+    fail=$((fail+1))
+  fi
+
+  # 6. DOMAINS set
+  if grep -q '^DOMAINS=.' "$app_env" 2>/dev/null; then
+    echo -e "  ${C_GREEN}✓${C_NC} DOMAINS           : $(grep '^DOMAINS=' "$app_env" | cut -d= -f2)"
+    pass=$((pass+1))
+  else
+    echo -e "  ${C_RED}✗${C_NC} DOMAINS           : kosong"
+    fail=$((fail+1))
+  fi
+
+  # 7. Database
+  if [ -f "$APP/data/tempmail.db" ]; then
+    echo -e "  ${C_GREEN}✓${C_NC} Database          : $APP/data/tempmail.db"
+    pass=$((pass+1))
+  else
+    echo -e "  ${C_RED}✗${C_NC} Database          : TIDAK ADA — akan dibuat saat start"
+    fail=$((fail+1))
+  fi
+
+  # 8. Local health check
+  local health
+  health=$(curl -s --max-time 5 "http://127.0.0.1:$port/health" 2>/dev/null)
+  if echo "$health" | grep -q '"ok"'; then
+    echo -e "  ${C_GREEN}✓${C_NC} Local health      : OK (port $port)"
+    pass=$((pass+1))
+  else
+    echo -e "  ${C_RED}✗${C_NC} Local health      : TIDAK MERESPON di port $port"
+    fail=$((fail+1))
+  fi
+
+  # 9. Admin user exists
+  local user_count
+  user_count=$(sqlite3 "$APP/data/tempmail.db" 'SELECT count(*) FROM users WHERE role="admin";' 2>/dev/null || echo "0")
+  if [ "$user_count" -gt 0 ]; then
+    echo -e "  ${C_GREEN}✓${C_NC} Admin user        : $user_count admin"
+    pass=$((pass+1))
+  else
+    echo -e "  ${C_RED}✗${C_NC} Admin user        : belum ada — jalankan: curl -X POST http://127.0.0.1:$port/api/setup ..."
+    fail=$((fail+1))
+  fi
+
+  echo
+  echo -e "  ${C_BOLD}─── Cloudflare ───${C_NC}"
+
+  # 10. cert.pem
+  if [ -f /root/.cloudflared/cert.pem ]; then
+    echo -e "  ${C_GREEN}✓${C_NC} CF Tunnel login   : cert.pem ada"
+    pass=$((pass+1))
+  else
+    echo -e "  ${C_RED}✗${C_NC} CF Tunnel login   : belum — menutempmail → 4"
+    fail=$((fail+1))
+  fi
+
+  # 11. cloudflared service
+  if systemctl is-active --quiet cloudflared 2>/dev/null; then
+    echo -e "  ${C_GREEN}✓${C_NC} cloudflared svc   : active"
+    pass=$((pass+1))
+  else
+    echo -e "  ${C_RED}✗${C_NC} cloudflared svc   : inactive — systemctl start cloudflared"
+    fail=$((fail+1))
+  fi
+
+  # 12. Tunnel config
+  if [ -f /etc/cloudflared/config.yml ]; then
+    echo -e "  ${C_GREEN}✓${C_NC} Tunnel config     : /etc/cloudflared/config.yml"
+    pass=$((pass+1))
+  else
+    echo -e "  ${C_RED}✗${C_NC} Tunnel config     : TIDAK ADA"
+    fail=$((fail+1))
+  fi
+
+  # 13. Tunnel ID in state
+  local tun_id
+  tun_id=$(python3 -c "import json;d=json.load(open('$STATE'));print(d.get('tunnel',{}).get('id','') or '')" 2>/dev/null || echo "")
+  if [ -n "$tun_id" ]; then
+    echo -e "  ${C_GREEN}✓${C_NC} Tunnel ID         : $tun_id"
+    pass=$((pass+1))
+  else
+    echo -e "  ${C_RED}✗${C_NC} Tunnel ID         : belum tersimpan di state"
+    fail=$((fail+1))
+  fi
+
+  echo
+  echo -e "  ${C_BOLD}─── Wrangler ───${C_NC}"
+
+  # 14. Wrangler token
+  local wrangler_status="belum"
+  if [ -f /root/.wrangler/config/default.toml ] && grep -q "oauth_token" /root/.wrangler/config/default.toml 2>/dev/null; then
+    wrangler_status="ok"
+  elif [ -f /root/.config/.wrangler/config/default.toml ] && grep -q "oauth_token" /root/.config/.wrangler/config/default.toml 2>/dev/null; then
+    wrangler_status="ok"
+  fi
+  if [ "$wrangler_status" = "ok" ]; then
+    echo -e "  ${C_GREEN}✓${C_NC} Wrangler login    : token ada"
+    pass=$((pass+1))
+  else
+    echo -e "  ${C_RED}✗${C_NC} Wrangler login    : belum — menutempmail → 3"
+    fail=$((fail+1))
+  fi
+
+  # 15. Worker deployed
+  local wrkr
+  wrkr=$(python3 -c "import json;d=json.load(open('$STATE'));ap=d.get('active_profile','');p=d.get('profiles',{}).get(ap,{});print('yes' if p.get('worker_deployed') else 'no')" 2>/dev/null || echo "no")
+  if [ "$wrkr" = "yes" ]; then
+    echo -e "  ${C_GREEN}✓${C_NC} Worker            : deployed"
+    pass=$((pass+1))
+  else
+    echo -e "  ${C_RED}✗${C_NC} Worker            : belum — menutempmail → 5"
+    fail=$((fail+1))
+  fi
+
+  # 16. Worker directory
+  if [ -d "$WORKER_DIR" ] && [ -f "$WORKER_DIR/wrangler.toml" ]; then
+    echo -e "  ${C_GREEN}✓${C_NC} Worker dir        : $WORKER_DIR"
+    pass=$((pass+1))
+  else
+    echo -e "  ${C_RED}✗${C_NC} Worker dir        : TIDAK ADA — install ulang"
+    fail=$((fail+1))
+  fi
+
+  echo
+  echo -e "  ${C_BOLD}─── Tunnel Connectivity ───${C_NC}"
+
+  # 17. Tunnel health (remote)
+  local web_url
+  web_url=$(python3 -c "import json;d=json.load(open('$STATE'));print(d.get('tunnel',{}).get('web_host','') or '')" 2>/dev/null || echo "")
+  if [ -n "$web_url" ]; then
+    local remote_health
+    remote_health=$(curl -s --max-time 10 "https://$web_url/health" 2>/dev/null)
+    if echo "$remote_health" | grep -q '"ok"'; then
+      echo -e "  ${C_GREEN}✓${C_NC} Tunnel health     : OK (https://$web_url)"
+      pass=$((pass+1))
+    else
+      echo -e "  ${C_RED}✗${C_NC} Tunnel health     : GAGAL — cek cloudflared + config.yml"
+      fail=$((fail+1))
+    fi
+  else
+    echo -e "  ${C_RED}✗${C_NC} Tunnel health     : web_host belum diset"
+    fail=$((fail+1))
+  fi
+
+  # 18. API test via tunnel
+  if [ -n "$web_url" ] && [ -n "$api_key" ]; then
+    local api_test
+    api_test=$(curl -s --max-time 10 "https://$web_url/api/config" 2>/dev/null)
+    if echo "$api_test" | grep -q "domains"; then
+      echo -e "  ${C_GREEN}✓${C_NC} API via tunnel    : OK"
+      pass=$((pass+1))
+    else
+      echo -e "  ${C_RED}✗${C_NC} API via tunnel    : GAGAL"
+      fail=$((fail+1))
+    fi
+  fi
+
+  # 19. Email Routing status
+  local routing
+  routing=$(python3 -c "import json;d=json.load(open('$STATE'));doms=d.get('domains',{});print('ON' if any(v.get('routing') for v in doms.values()) else 'OFF')" 2>/dev/null || echo "OFF")
+  if [ "$routing" = "ON" ]; then
+    echo -e "  ${C_GREEN}✓${C_NC} Email Routing     : ON"
+    pass=$((pass+1))
+  else
+    echo -e "  ${C_RED}✗${C_NC} Email Routing     : OFF — menutempmail → 6"
+    fail=$((fail+1))
+  fi
+
+  echo
+  echo -e "  ${C_BOLD}─── Backup ───${C_NC}"
+
+  # 20. SQLite backup timer
+  if systemctl is-active --quiet tempmail-backup.timer 2>/dev/null; then
+    echo -e "  ${C_GREEN}✓${C_NC} Backup timer      : active"
+    pass=$((pass+1))
+  else
+    echo -e "  ${C_YELLOW}⚠${C_NC} Backup timer      : inactive — systemctl enable --now tempmail-backup.timer"
+    fail=$((fail+1))
+  fi
+
+  # Summary
+  echo
+  echo -e "  ${C_BOLD}═══ Summary ═══${C_NC}"
+  local total=$((pass+fail))
+  if [ $fail -eq 0 ]; then
+    echo -e "  ${C_GREEN}${C_BOLD}✓ ALL CHECKS PASSED ($pass/$total)${C_NC}"
+    echo -e "  ${C_GREEN}TempMail By JhopanStore — sehat sempurna!${C_NC}"
+  else
+    echo -e "  ${C_GREEN}✓ Passed: $pass${C_NC}  ${C_RED}✗ Failed: $fail${C_NC}  ${C_DIM}(total: $total)${C_NC}"
+    echo -e "  ${C_YELLOW}Perbaiki yang ✗ di atas.${C_NC}"
+  fi
+  echo
+  read -r -p "  Tekan ENTER untuk kembali..."
+}
+
 manage_admin() {
   local app_env=/etc/tempmail/tempmail.env
   local port
@@ -769,6 +1017,7 @@ main() {
     echo -e "  ${C_CYAN}8${C_NC}) SETUP GUIDED ${C_DIM}(sekali jalan)${C_NC}"
     echo -e "  ${C_CYAN}9${C_NC}) AUTO SETUP ${C_DIM}(bertahap)${C_NC}"
     echo -e "  ${C_YELLOW}A${C_NC}) Kelola admin ${C_DIM}(buat/cek/reset)${C_NC}"
+    echo -e "  ${C_GREEN}D${C_NC}) Doctor ${C_DIM}(cek semua status)${C_NC}"
     echo
     echo -e "  ${C_DIM}─── Maintenance ───${C_NC}"
     echo -e "  ${C_RED}L1${C_NC}) Logout Wrangler"
@@ -786,6 +1035,7 @@ main() {
       6) enable_routing_for_domain ;; 7) set_copy_destinations ;;
       8) guided_setup ;; 9) full_setup ;;
       A|a) manage_admin ;;
+      D|d) doctor ;;
       L1|l1) logout_wrangler ;;
       L2|l2) logout_tunnel ;;
       L3|l3) reset_all ;;
