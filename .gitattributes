@@ -1,26 +1,13 @@
-# Normalize all text files to LF on checkout; committed bytes stay LF.
+# Line endings: keep everything LF in the repository and the working copy.
+# The deploy target is Linux, and a CRLF shell script or systemd unit can fail at
+# runtime ("bad interpreter", "missing ]"). CRLF in a checkout also made every
+# host-versus-repo diff unreadable.
 * text=auto eol=lf
 
-# Files that must be reviewed/diffed as LF text.
-*.go       text eol=lf
-*.js       text eol=lf
-*.html     text eol=lf
-*.css      text eol=lf
-*.sh       text eol=lf
-*.md       text eol=lf
-*.yaml     text eol=lf
-*.yml      text eol=lf
-*.json     text eol=lf
-*.service  text eol=lf
-*.timer    text eol=lf
-*.path     text eol=lf
-*.sql      text eol=lf
-Dockerfile text eol=lf
-
-# Archives and images: never diff, never normalize.
+# Binary assets must stay untouched.
 *.png binary
-*.jpg binary
 *.webp binary
+*.jpg binary
 *.ico binary
 *.gz binary
-*.zip binary
+*.db binary
