@@ -195,6 +195,38 @@ To fully retire a domain:
 2. Remove it from TempMail menu.
 3. Keep DNS/zone unless explicitly retiring it.
 
+The panel offers the same in two labelled actions per row: `Hapus domain` (local only) and, for a
+domain that is still routing, `Matikan & hapus` (disables the catch-all first, then removes it).
+
+## Adding a domain from a second Cloudflare account
+
+One TempMail instance accepts domains from several Cloudflare accounts. Each profile keeps its own
+account ID and API token, and every Cloudflare call for a domain uses that domain's profile, so a
+token can never act on the other account's zone. The check below is the proof to run after adding a
+profile: adding a domain that lives in account B while selecting account A must be rejected.
+
+Verified flow, all from `/admin` (no SSH):
+
+1. `Akun Cloudflare` → create the second profile (`id`, label, account ID, API token of that account,
+   leave "activate" off when it is not the main account).
+2. `Domain` → add the domain, pick the second profile in the profile dropdown. A zone that does not
+   exist in that account is refused with the Cloudflare reason in `detail`.
+3. `Domain` → `Periksa` on that row, then `Rapikan`: this deploys the Worker for that profile, enables
+   Email Routing, creates the missing Email Routing records, and creates the web-host CNAME.
+4. `Tunnel` → `Buat CNAME web host` once per web-host zone; the tunnel itself is shared, and every
+   profile's Worker gets the same `TEMPMAIL_SERVER_URL` and `TEMPMAIL_API_KEY` during deploy.
+
+The same is available in `menutempmail`: option `1` adds the profile, `2` adds the domain, `5`
+deploys the Worker for the selected profile, `6` enables routing.
+
+Pitfalls:
+
+- A profile without an API token cannot be used for these steps; `menutempmail` option `3` stores a
+  token for an existing profile (an install that came from the old wrangler-login flow has none).
+- Worker names are per account, so the same name exists once in each account; that is expected.
+- Domain names are unique across the whole instance, so the same domain cannot be registered twice.
+- The web host CNAME belongs to the account that owns the web-host zone, not to every profile.
+
 ## Backup and restore
 
 ```bash
