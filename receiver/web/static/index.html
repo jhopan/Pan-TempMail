@@ -23,6 +23,7 @@
     .btn-sm{background:rgba(239,68,68,.15);color:var(--red);border:1px solid rgba(239,68,68,.3);
       padding:4px 12px;border-radius:6px;font-size:13px;cursor:pointer;transition:.2s}
     .btn-sm:hover{background:rgba(239,68,68,.3)}
+    .topbar-r{display:flex;gap:8px;align-items:center}
     .layout{display:flex;flex:1;overflow:hidden}
     .sidebar{width:300px;min-width:300px;border-right:1px solid var(--border);display:flex;flex-direction:column}
     .sb-head{padding:16px 16px 12px;border-bottom:1px solid var(--border)}
@@ -83,7 +84,9 @@
 <body>
   <div class="topbar">
     <div class="topbar-l">⚡ Logged in as <b id="userEmail">unknown</b></div>
-    <button class="btn-sm" onclick="API.logout()">Logout</button>
+    <div class="topbar-r">
+      <button class="btn-sm" onclick="API.logout()">Logout</button>
+    </div>
   </div>
   <div class="layout">
     <div class="sidebar">

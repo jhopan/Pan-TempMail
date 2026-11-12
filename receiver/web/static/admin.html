@@ -1,0 +1,508 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Panel kendali - TempMail By JhopanStore</title>
+  <style>
+    *{margin:0;padding:0;box-sizing:border-box}
+    :root{
+      --bg:#0a0a0f;--surface:#12121a;--surface-2:#171722;--border:#1e1e2e;--text:#e2e8f0;
+      --muted:#64748b;--brand:#8b5cf6;--brand-d:#7c3aed;
+      --green:#22c55e;--red:#ef4444;--blue:#3b82f6;--radius:10px;
+    }
+    body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+      background:var(--bg);color:var(--text);min-height:100vh}
+    ::-webkit-scrollbar{width:8px;height:8px}::-webkit-scrollbar-track{background:transparent}
+    ::-webkit-scrollbar-thumb{background:#2b2b3a;border-radius:4px}
+    ::-webkit-scrollbar-thumb:hover{background:#3a3a4d}
+    a{color:var(--blue);text-decoration:none}
+    :focus-visible{outline:2px solid var(--brand);outline-offset:2px}
+    [hidden]{display:none !important}
+
+    /* layout shell */
+    .shell{display:grid;grid-template-columns:252px minmax(0,1fr);min-height:100vh}
+    .nav{position:sticky;top:0;align-self:start;height:100vh;display:flex;flex-direction:column;gap:6px;
+      padding:16px 12px;background:var(--surface);border-right:1px solid var(--border);overflow-y:auto}
+    .brand{display:flex;align-items:center;gap:9px;padding:4px 8px 14px;border-bottom:1px solid var(--border)}
+    .brand-mark{width:30px;height:30px;flex:0 0 auto;display:grid;place-items:center;border-radius:9px;
+      background:linear-gradient(160deg,var(--brand),var(--brand-d));font-size:15px}
+    .brand-txt{font-size:13px;line-height:1.25}
+    .brand-txt b{display:block;color:#fff}
+    .brand-txt span{color:var(--muted);font-size:11px}
+    .nav-group{display:flex;flex-direction:column;gap:3px;margin-top:12px}
+    .nav-group > p{font-size:10px;text-transform:uppercase;letter-spacing:.09em;color:var(--muted);padding:0 9px 4px}
+    .nav-item{display:flex;flex-direction:column;gap:2px;width:100%;text-align:left;font:inherit;font-size:13px;
+      color:var(--text);background:transparent;border:1px solid transparent;border-radius:8px;padding:9px 10px;
+      min-height:44px;cursor:pointer;transition:background .15s,border-color .15s}
+    .nav-item:hover{background:var(--surface-2)}
+    .nav-item small{color:var(--muted);font-size:11px}
+    .nav-item[aria-current="page"]{background:var(--surface-2);border-color:var(--border);
+      box-shadow:inset 2px 0 0 var(--brand)}
+    .nav-item[aria-current="page"] small{color:#a5b4fc}
+    .nav-foot{margin-top:auto;padding-top:12px;border-top:1px solid var(--border);display:flex;flex-direction:column;gap:8px}
+    .nav-user{font-size:11px;color:var(--muted);padding:0 9px;word-break:break-all}
+    .nav-foot .row-actions{padding:0 3px}
+    .nav-toggle{display:none}
+    .scrim{position:fixed;inset:0;background:rgba(0,0,0,.62);z-index:40;border:0}
+
+    /* main column */
+    .col{display:flex;flex-direction:column;min-width:0}
+    .view-head{position:sticky;top:0;z-index:30;display:flex;align-items:center;gap:10px;
+      padding:11px 18px;border-bottom:1px solid var(--border);background:rgba(10,10,15,.94)}
+    .view-title b{font-size:14px}
+    .view-title span{display:block;font-size:11px;color:var(--muted);max-width:62ch}
+    .view-tools{margin-left:auto;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+    .view-body{flex:1;padding:18px;display:flex;flex-direction:column;gap:14px;width:100%;max-width:1100px}
+    .panel{display:flex;flex-direction:column;gap:11px}
+    .panel h2{font-size:15px;font-weight:700}
+    h3{font-size:12px;font-weight:600;color:var(--muted);margin:12px 0 6px}
+    h3:first-child{margin-top:0}
+    .panel-note{font-size:12px;color:var(--muted);max-width:78ch;line-height:1.5}
+    .gate{max-width:560px;margin:52px auto;background:var(--surface);border:1px solid var(--border);
+      border-radius:var(--radius);padding:18px;font-size:13px;line-height:1.55}
+    .gate .note{margin-top:6px}
+    body.gated .nav{display:none}
+    body.gated .shell{grid-template-columns:minmax(0,1fr)}
+    body.gated .view-head{display:none}
+
+    /* cards & controls (shared with the JS-rendered nodes) */
+    .card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:15px}
+    .card-head{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap}
+    .card-head > div:first-child{min-width:0}
+    .note{font-size:12px;color:var(--muted);margin-top:4px;max-width:78ch;line-height:1.5}
+    .note.warn{color:#fca5a5}
+    .btn{padding:10px 14px;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;
+      border:1px solid transparent;transition:.18s;font-family:inherit}
+    .btn.small{padding:8px 11px;font-size:12px}
+    .btn-p{background:var(--brand-d);color:#fff}.btn-p:hover{background:#6d28d9}
+    .btn-s{background:#22222f;color:var(--text);border-color:var(--border)}.btn-s:hover{background:#2c2c3d}
+    .btn-danger{background:rgba(239,68,68,.15);color:var(--red);border-color:rgba(239,68,68,.3)}
+    .btn-danger:hover{background:rgba(239,68,68,.3)}
+    .btn:disabled{opacity:.45;cursor:not-allowed}
+    input,select,textarea{font-family:inherit;background:var(--bg);border:1px solid var(--border);
+      color:var(--text);padding:10px 12px;border-radius:8px;font-size:13px;width:100%}
+    textarea{min-height:84px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;resize:vertical}
+    input:focus,select:focus,textarea:focus{border-color:var(--brand)}
+    .mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;word-break:break-all}
+    .grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:11px;margin-top:6px}
+    .grid.cols-3{grid-template-columns:repeat(3,minmax(0,1fr))}
+    .field{display:flex;flex-direction:column;gap:4px;min-width:0}
+    .field label{font-size:12px;color:var(--muted)}
+    .field .hint{font-size:11px;color:var(--muted);line-height:1.45}
+    .check{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text);min-height:44px}
+    .check input{width:auto}
+    .form-actions{display:flex;gap:8px;flex-wrap:wrap;grid-column:1/-1;margin-top:2px}
+    .table-wrap{border:1px solid var(--border);border-radius:9px;overflow:auto;max-height:60vh}
+    table{width:100%;border-collapse:collapse;font-size:13px}
+    th{position:sticky;top:0;background:var(--surface-2);text-align:left;font-size:11px;text-transform:uppercase;
+      letter-spacing:.05em;color:var(--muted);padding:9px 10px;border-bottom:1px solid var(--border);white-space:nowrap}
+    td{padding:10px;border-bottom:1px solid var(--border);vertical-align:middle;word-break:break-word}
+    tr:last-child td{border-bottom:0}
+    tbody tr:hover{background:var(--surface-2)}
+    .row-actions{display:flex;gap:6px;flex-wrap:wrap}
+    .badge{display:inline-block;padding:3px 9px;border-radius:999px;font-size:11px;
+      border:1px solid var(--border);color:var(--muted);white-space:nowrap}
+    .badge.on{color:var(--green);border-color:rgba(34,197,94,.35);background:rgba(34,197,94,.12)}
+    .badge.off{color:var(--red);border-color:rgba(239,68,68,.35);background:rgba(239,68,68,.1)}
+    .state{border:1px dashed var(--border);border-radius:9px;padding:13px;font-size:13px;color:var(--muted)}
+    .state.loading{display:flex;align-items:center;gap:8px}
+    .state.error{border-style:solid;border-color:rgba(239,68,68,.4);color:#fca5a5;background:rgba(239,68,68,.06)}
+    .state-detail{margin-top:6px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px;
+      color:var(--muted);word-break:break-all}
+    .spinner{width:14px;height:14px;flex:0 0 auto;border:2px solid var(--border);border-top-color:var(--brand);
+      border-radius:50%;display:inline-block;animation:spin .8s linear infinite}
+    @keyframes spin{to{transform:rotate(360deg)}}
+    .out{font-size:12px;color:var(--muted)}
+    .out:empty{display:none}
+    .out.ok{color:var(--green)}
+    .out.error{color:#fca5a5}
+    .out-detail{display:block;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px;
+      color:var(--muted);word-break:break-all}
+    .kv{display:grid;grid-template-columns:180px minmax(0,1fr);gap:5px 12px;font-size:13px}
+    .kv dt{color:var(--muted);font-size:12px}
+    .kv dd{word-break:break-all}
+    .cards-2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}
+    .list{list-style:none;display:flex;flex-direction:column;gap:6px;font-size:13px}
+    .list li{display:flex;align-items:center;gap:8px;background:var(--bg);border:1px solid var(--border);
+      border-radius:8px;padding:9px 11px;word-break:break-all}
+    .block{display:block;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:11px;
+      font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;white-space:pre-wrap;
+      word-break:break-all;margin-top:6px}
+    .server-actions{display:flex;flex-wrap:wrap;gap:8px;align-items:flex-end;margin-top:6px}
+    .log-lines{max-width:190px}
+    .output{display:block;background:var(--bg);border:1px solid var(--border);border-radius:9px;padding:11px;
+      margin-top:6px;max-height:340px;overflow:auto;white-space:pre-wrap;word-break:break-word;font-size:12px;
+      font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+    .out-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:8px}
+    .out-head h3{margin:0}
+    .token-input{margin-top:6px;font-size:12px;padding:8px 10px}
+    .modal{position:fixed;inset:0;background:rgba(0,0,0,.72);display:flex;align-items:center;
+      justify-content:center;padding:16px;z-index:50}
+    .modal-box{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);
+      padding:15px;width:100%;max-width:580px;max-height:90vh;overflow:auto}
+    .modal-head{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px}
+
+    @media (max-width:900px){
+      .shell{grid-template-columns:minmax(0,1fr)}
+      .nav{position:fixed;inset:0 auto 0 0;width:278px;height:100dvh;z-index:50;transform:translateX(-101%);
+        transition:transform .18s ease-out}
+      body.nav-open .nav{transform:none}
+      .nav-toggle{display:inline-flex}
+      .view-head{padding:10px 14px}
+      .view-body{padding:14px}
+    }
+    @media (max-width:640px){
+      .grid,.grid.cols-3,.cards-2{grid-template-columns:minmax(0,1fr)}
+      .kv{grid-template-columns:minmax(0,1fr)}
+      .btn,.check,input,select,.nav-item{min-height:44px}
+      .table-wrap{max-height:none;border:0;overflow:visible}
+      thead{display:none}
+      table,tbody,tr,td{display:block;width:100%}
+      tbody tr{border:1px solid var(--border);border-radius:9px;padding:10px;margin-bottom:10px;background:var(--surface-2)}
+      td{border-bottom:none;padding:5px 2px;display:flex;flex-wrap:wrap;gap:6px;align-items:center;justify-content:space-between}
+      td::before{content:attr(data-label);font-size:11px;text-transform:uppercase;letter-spacing:.05em;
+        color:var(--muted);flex:0 0 auto}
+      td .row-actions{width:100%}
+    }
+    @media (prefers-reduced-motion:reduce){
+      *{transition:none !important;animation-duration:.01ms !important}
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <aside class="nav" id="shellNav" aria-label="Navigasi panel">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true">⚡</span>
+        <span class="brand-txt"><b>TempMail</b><span>Panel kendali</span></span>
+      </div>
+
+      <nav class="nav-group" aria-label="Bagian panel">
+        <p>Ringkasan</p>
+        <button class="nav-item" type="button" data-panel="status">Status
+          <small>helper, aplikasi, database</small></button>
+        <button class="nav-item" type="button" data-panel="server">Server
+          <small>service, backup, log, doctor</small></button>
+      </nav>
+
+      <nav class="nav-group" aria-label="Cloudflare">
+        <p>Cloudflare</p>
+        <button class="nav-item" type="button" data-panel="cloudflare">Akun
+          <small>profil &amp; API token</small></button>
+        <button class="nav-item" type="button" data-panel="domains">Domain
+          <small>zona &amp; routing catch-all</small></button>
+        <button class="nav-item" type="button" data-panel="tunnel">Tunnel
+          <small>web host &amp; konektor</small></button>
+      </nav>
+
+      <nav class="nav-group" aria-label="Lainnya">
+        <p>Lainnya</p>
+        <button class="nav-item" type="button" data-panel="copies">Salinan email
+          <small>tembusan opsional</small></button>
+        <button class="nav-item" type="button" data-panel="import">Impor state
+          <small>dari menu lama</small></button>
+      </nav>
+
+      <div class="nav-foot">
+        <p class="nav-user" id="navUser">-</p>
+        <div class="row-actions">
+          <a class="btn btn-s small" href="/app/" id="inboxLink">Buka inbox</a>
+          <button class="btn btn-s small" type="button" id="logoutBtn">Logout</button>
+        </div>
+      </div>
+    </aside>
+
+    <button class="scrim" id="navScrim" type="button" tabindex="-1" aria-hidden="true" hidden></button>
+
+    <div class="col">
+      <header class="view-head">
+        <button class="btn btn-s small nav-toggle" id="navToggle" type="button" aria-expanded="false" aria-controls="shellNav">Menu</button>
+        <div class="view-title">
+          <b id="viewTitle">Status</b>
+          <span id="viewSub">Kondisi helper root, aplikasi, database, dan koneksi Cloudflare.</span>
+        </div>
+        <div class="view-tools">
+          <span class="badge" id="helperPill">helper: ?</span>
+        </div>
+      </header>
+
+      <main class="view-body" id="panel">
+
+        <section class="panel card" data-panel="status" aria-labelledby="hStatus">
+          <div class="card-head">
+            <div>
+              <h2 id="hStatus">Status</h2>
+              <p class="note">Fakta lokal dari aplikasi: helper root, proses, database, dan ringkasan Cloudflare.</p>
+            </div>
+            <div class="row-actions">
+              <button id="testConnBtn" class="btn btn-s small" type="button">Test koneksi</button>
+              <button id="svReloadBtn" class="btn btn-s small" type="button">Muat ulang</button>
+            </div>
+          </div>
+          <div id="statusOut" class="out" role="status" aria-live="polite"></div>
+          <div id="serverState" class="state" role="status"></div>
+          <div id="serverWrap" hidden>
+            <div class="cards-2">
+              <div>
+                <h3>Helper root</h3>
+                <dl class="kv" id="svHelper"></dl>
+              </div>
+              <div>
+                <h3>Aplikasi</h3>
+                <dl class="kv" id="svApp"></dl>
+              </div>
+              <div>
+                <h3>Database</h3>
+                <dl class="kv" id="svDb"></dl>
+              </div>
+              <div>
+                <h3>Cloudflare</h3>
+                <dl class="kv" id="svCf"></dl>
+              </div>
+            </div>
+          </div>
+          <div id="svHelperNote" class="note warn" hidden></div>
+        </section>
+
+        <section class="panel card" data-panel="server" aria-labelledby="hServer" id="serverSection">
+          <div class="card-head">
+            <div>
+              <h2 id="hServer">Server</h2>
+              <p class="note">Aksi ini dijalankan helper root lewat allowlist: service, backup, log, doctor, dan konektor cloudflared.</p>
+            </div>
+          </div>
+
+          <h3>Aksi sistem</h3>
+          <div class="server-actions">
+            <button id="svServiceBtn" class="btn btn-s" type="button">Cek service</button>
+            <button id="svBackupBtn" class="btn btn-s" type="button">Backup sekarang</button>
+            <button id="svRestartBtn" class="btn btn-danger" type="button">Restart service</button>
+            <button id="svDoctorBtn" class="btn btn-s" type="button">Doctor</button>
+            <div class="field log-lines">
+              <label for="svLogLines">Baris log</label>
+              <select id="svLogLines">
+                <option value="50">50 baris</option>
+                <option value="100" selected>100 baris</option>
+                <option value="200">200 baris</option>
+                <option value="500">500 baris</option>
+              </select>
+            </div>
+            <button id="svLogBtn" class="btn btn-p" type="button">Lihat log</button>
+          </div>
+
+          <h3>cloudflared (konektor tunnel)</h3>
+          <div class="server-actions">
+            <button id="svTnStatusBtn" class="btn btn-s" type="button">Status tunnel</button>
+            <button id="svTnRestartBtn" class="btn btn-danger" type="button">Restart tunnel</button>
+          </div>
+          <form id="svTnForm" class="grid">
+            <div class="field">
+              <label for="svTnToken">Connector token Cloudflare</label>
+              <input id="svTnToken" type="password" autocomplete="off" spellcheck="false" placeholder="token dari dashboard Cloudflare">
+              <span class="hint">Token hanya dikirim ke helper root, tidak disimpan di panel dan tidak pernah ditampilkan lagi.</span>
+            </div>
+            <div class="form-actions">
+              <button id="svTnInstallBtn" class="btn btn-p" type="submit">Pasang/Update tunnel</button>
+            </div>
+          </form>
+          <form id="svTnLogoutForm" class="grid">
+            <div class="field">
+              <label for="svTnReset">Ketik RESET untuk logout tunnel</label>
+              <input id="svTnReset" autocomplete="off" spellcheck="false" placeholder="RESET">
+              <span class="hint">Logout menghapus credential Cloudflare dan service cloudflared di server.</span>
+            </div>
+            <div class="form-actions">
+              <button id="svTnLogoutBtn" class="btn btn-danger" type="submit">Logout tunnel</button>
+            </div>
+          </form>
+
+          <div id="svMsg" class="out" role="status" aria-live="polite"></div>
+          <div id="svOutputMeta" class="out" role="status" aria-live="polite"></div>
+          <div class="out-head" id="svOutputHead" hidden>
+            <h3>Keluaran</h3>
+            <button class="btn btn-s small" type="button" id="svOutputCopy">Salin keluaran</button>
+          </div>
+          <pre id="svOutput" class="output" tabindex="0" hidden></pre>
+        </section>
+
+        <section class="panel card" data-panel="cloudflare" aria-labelledby="hProfiles">
+          <div class="card-head">
+            <div>
+              <h2 id="hProfiles">Akun Cloudflare</h2>
+              <p class="note">Setiap domain terikat ke satu profil. Token disimpan terenkripsi di database dan tidak pernah ditampilkan lagi.</p>
+            </div>
+            <button id="pfReloadBtn" class="btn btn-s small" type="button">Muat ulang</button>
+          </div>
+          <div id="profilesState" class="state" role="status"></div>
+          <div id="profilesWrap" class="table-wrap" hidden>
+            <table>
+              <thead>
+                <tr>
+                  <th>ID</th><th>Label</th><th>Account ID</th><th>Active</th>
+                  <th>Worker</th><th>Domains</th><th>Token</th><th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="profilesBody"></tbody>
+            </table>
+          </div>
+          <div id="profilesMsg" class="out" role="status" aria-live="polite"></div>
+          <h3>Tambah profil</h3>
+          <form id="profileForm" class="grid">
+            <div class="field">
+              <label for="pfId">ID profil</label>
+              <input id="pfId" required maxlength="32" pattern="[A-Za-z0-9_-]{1,32}" placeholder="main">
+            </div>
+            <div class="field">
+              <label for="pfLabel">Label</label>
+              <input id="pfLabel" placeholder="Akun utama">
+            </div>
+            <div class="field">
+              <label for="pfAccount">Account ID</label>
+              <input id="pfAccount" required placeholder="a1b2c3d4e5f6">
+            </div>
+            <div class="field">
+              <label for="pfToken">API token</label>
+              <input id="pfToken" type="password" required autocomplete="off" placeholder="cloudflare api token">
+              <span class="hint">Butuh izin Zone:Read, Email Routing Rules:Edit, Workers Scripts:Edit.</span>
+            </div>
+            <label class="check"><input id="pfActivate" type="checkbox"> Jadikan profil aktif</label>
+            <div class="form-actions">
+              <button id="pfAddBtn" class="btn btn-p" type="submit">Tambah profil</button>
+            </div>
+          </form>
+        </section>
+
+        <section class="panel card" data-panel="domains" aria-labelledby="hDomains">
+          <div class="card-head">
+            <div>
+              <h2 id="hDomains">Domain temp mail</h2>
+              <p class="note">Aktifkan routing untuk memasang catch-all <span class="mono">*@domain</span> ke Worker profil terkait.</p>
+            </div>
+            <button id="dmReloadBtn" class="btn btn-s small" type="button">Muat ulang</button>
+          </div>
+          <div id="domainsState" class="state" role="status"></div>
+          <div id="domainsWrap" class="table-wrap" hidden>
+            <table>
+              <thead>
+                <tr>
+                  <th>Domain</th><th>Profile</th><th>Zone ID</th><th>Routing</th>
+                  <th>Unlock DNS</th><th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="domainsBody"></tbody>
+            </table>
+          </div>
+          <div id="domainsMsg" class="out" role="status" aria-live="polite"></div>
+          <h3>Tambah domain</h3>
+          <form id="domainForm" class="grid">
+            <div class="field">
+              <label for="dmDomain">Domain</label>
+              <input id="dmDomain" required placeholder="mail.example.com">
+            </div>
+            <div class="field">
+              <label for="dmProfile">Profile</label>
+              <select id="dmProfile"></select>
+            </div>
+            <div class="form-actions">
+              <button id="dmAddBtn" class="btn btn-p" type="submit">Tambah domain</button>
+            </div>
+          </form>
+        </section>
+
+        <section class="panel card" data-panel="tunnel" aria-labelledby="hTunnel">
+          <div class="card-head">
+            <div>
+              <h2 id="hTunnel">Tunnel</h2>
+              <p class="note">Hostname tunnel adalah jalur Worker ke server ini. Hostname webnya bukan domain temp mail.</p>
+            </div>
+            <button id="tnReloadBtn" class="btn btn-s small" type="button">Muat ulang</button>
+          </div>
+          <div id="tunnelState" class="state" role="status"></div>
+          <div id="tunnelWrap" hidden>
+            <dl class="kv" id="tunnelInfo"></dl>
+          </div>
+          <div id="tunnelMsg" class="out" role="status" aria-live="polite"></div>
+          <h3>Setelan</h3>
+          <form id="tunnelForm" class="grid">
+            <div class="field">
+              <label for="tnWebHost">Web host</label>
+              <input id="tnWebHost" placeholder="mail.example.com">
+              <span class="hint">Harus punya CNAME ke tunnel. Nilai ini dipakai Worker sebagai TEMPMAIL_SERVER_URL.</span>
+            </div>
+            <div class="field">
+              <label for="tnName">Nama tunnel</label>
+              <input id="tnName" placeholder="tempmailbyjhopanstore">
+            </div>
+            <div class="form-actions">
+              <button id="tnSaveBtn" class="btn btn-p" type="submit">Simpan setelan</button>
+              <button id="tnCreateBtn" class="btn btn-s" type="button">Buat tunnel baru</button>
+            </div>
+          </form>
+          <p class="note">Memasang, me-restart, dan logout konektor <span class="mono">cloudflared</span> ada di panel <b>Server</b> karena butuh helper root.</p>
+        </section>
+
+        <section class="panel card" data-panel="copies" aria-labelledby="hCopies">
+          <div class="card-head">
+            <div>
+              <h2 id="hCopies">Salinan email</h2>
+              <p class="note">Kosong berarti OFF. Alamat tujuan harus diverifikasi Cloudflare di akun profil terkait, dan berlaku setelah Worker di-deploy ulang.</p>
+            </div>
+          </div>
+          <div id="copiesState" class="state" role="status"></div>
+          <div id="copiesWrap" hidden>
+            <h3>Terpasang sekarang</h3>
+            <ul class="list" id="copiesList"></ul>
+          </div>
+          <div id="copiesMsg" class="out" role="status" aria-live="polite"></div>
+          <form id="copiesForm" class="grid">
+            <div class="field">
+              <label for="cpInput">Tujuan salinan (pisahkan dengan koma)</label>
+              <textarea id="cpInput" rows="2" placeholder="a@b.c, d@e.f"></textarea>
+            </div>
+            <div class="form-actions">
+              <button id="cpSaveBtn" class="btn btn-p" type="submit">Simpan tujuan salinan</button>
+            </div>
+          </form>
+        </section>
+
+        <section class="panel card" data-panel="import" aria-labelledby="hImport">
+          <div class="card-head">
+            <div>
+              <h2 id="hImport">Impor state lama</h2>
+              <p class="note">Tempel isi <span class="mono">cloudflare-state.json</span> dari menu lama. Profil yang sudah ada tetap, token lama tidak ditimpa.</p>
+            </div>
+          </div>
+          <div id="imState" class="state" role="status"></div>
+          <div id="imMsg" class="out" role="status" aria-live="polite"></div>
+          <form id="importForm" class="grid">
+            <div class="field">
+              <label for="imInput">Isi cloudflare-state.json</label>
+              <textarea id="imInput" rows="8" spellcheck="false" placeholder='{"active_profile":"main","profiles":{}}'></textarea>
+            </div>
+            <div class="form-actions">
+              <button id="imBtn" class="btn btn-p" type="submit">Impor state</button>
+            </div>
+          </form>
+        </section>
+      </main>
+
+      <div id="gate" class="gate" hidden></div>
+    </div>
+  </div>
+
+  <div id="modal" class="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle" hidden>
+    <div class="modal-box">
+      <div class="modal-head">
+        <h2 id="modalTitle">Tunnel</h2>
+        <button id="modalClose" class="btn btn-s small" type="button">Tutup</button>
+      </div>
+      <div id="modalBody"></div>
+    </div>
+  </div>
+
+  <script src="/app/app.js?v=2"></script>
+  <script src="/app/admin.js?v=2"></script>
+  <script src="/app/admin-nav.js?v=2"></script>
+</body>
+</html>
