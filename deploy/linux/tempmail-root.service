@@ -1,0 +1,9 @@
+[Unit]
+Description=TempMail root helper (validated server actions)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/tempmail-root --once
+Nice=5

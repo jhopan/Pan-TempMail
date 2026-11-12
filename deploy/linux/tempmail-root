@@ -1,0 +1,548 @@
+#!/usr/bin/env python3
+"""TempMail root helper.
+
+The app runs unprivileged (systemd User=tempmail, NoNewPrivileges=true) and cannot touch
+/etc, systemd, or cloudflared credentials. This helper is the only root component: it consumes
+request files from a spool directory owned by the app user, validates them against a fixed
+allowlist, runs the matching action without a shell, and writes a result file back.
+
+Nothing outside the allowlist is executable through this program, and no request value is ever
+passed to a shell. Python was chosen over bash so request parsing and argument passing cannot
+degenerate into string interpolation.
+
+Usage: tempmail-root [--once|--watch] [--version]
+"""
+
+import argparse
+import grp
+import json
+import os
+import pwd
+import re
+import shlex
+import shutil
+import signal
+import subprocess
+import sys
+import time
+
+HELPER_DIR = os.environ.get("HELPER_DIR", "/opt/tempmail/data/helper")
+HELPER_USER = os.environ.get("HELPER_USER", "tempmail")
+APP_SERVICE = os.environ.get("HELPER_APP_SERVICE", "tempmail")
+TUNNEL_SERVICE = os.environ.get("HELPER_TUNNEL_SERVICE", "cloudflared")
+BACKUP_SERVICE = os.environ.get("HELPER_BACKUP_SERVICE", "tempmail-backup.service")
+BACKUP_TIMER = os.environ.get("HELPER_BACKUP_TIMER", "tempmail-backup.timer")
+APP_BINARY = os.environ.get("HELPER_APP_BINARY", "/opt/tempmail/tempmail")
+ENV_FILE = os.environ.get("HELPER_ENV_FILE", "/etc/tempmail/tempmail.env")
+DATA_DIR = os.environ.get("HELPER_DATA_DIR", "/opt/tempmail/data")
+TUNNEL_CONFIG = os.environ.get("HELPER_TUNNEL_CONFIG", "/etc/cloudflared/config.yml")
+TUNNEL_CERT = os.environ.get("HELPER_TUNNEL_CERT", "/root/.cloudflared/cert.pem")
+WORKER_DIR = os.environ.get("HELPER_WORKER_DIR", "/opt/tempmail/worker")
+
+IN_DIR = os.path.join(HELPER_DIR, "in")
+OUT_DIR = os.path.join(HELPER_DIR, "out")
+STATE_DIR = os.path.join(HELPER_DIR, "state")
+
+MAX_REQUEST_BYTES = 4096
+MAX_OUTPUT_BYTES = 20000
+MAX_JOBS_PER_RUN = 10
+COMMAND_TIMEOUT = 30
+INSTALL_TIMEOUT = 90
+ID_RE = re.compile(r"^[0-9a-f]{16}$")
+TOKEN_RE = re.compile(r"^[A-Za-z0-9._~-]{20,4096}$")
+
+# action -> (cooldown seconds, fire and forget)
+ACTIONS = {
+    "service-status": (0, False),
+    "restart-service": (10, True),
+    "backup-now": (10, False),
+    "logs": (0, False),
+    "doctor": (0, False),
+    "tunnel-status": (0, False),
+    "tunnel-install": (30, False),
+    "tunnel-restart": (10, False),
+    "tunnel-logout": (60, True),
+}
+
+ALLOWED_FIELDS = {"id", "action", "lines", "token", "confirm", "delay", "requested_by"}
+
+
+class Reject(Exception):
+    """Request is malformed or not allowed."""
+
+
+def log(message):
+    print("[tempmail-root] " + message, flush=True)
+
+
+def command_for(env_key, binary_name):
+    """Resolve an external command. The env override exists so the helper can be tested with
+    stubs; the production systemd unit never sets it, so a fixed binary name is used there."""
+    override = os.environ.get(env_key)
+    if override:
+        return shlex.split(override)
+    found = shutil.which(binary_name)
+    return [found or binary_name]
+
+
+def systemctl_cmd():
+    return command_for("HELPER_SYSTEMCTL", "systemctl")
+
+
+def journalctl_cmd():
+    return command_for("HELPER_JOURNALCTL", "journalctl")
+
+
+def cloudflared_cmd():
+    return command_for("HELPER_CLOUDFLARED", "cloudflared")
+
+
+def cloudflared_available():
+    cmd = cloudflared_cmd()
+    return bool(shutil.which(cmd[0]) or os.path.isfile(cmd[0]))
+
+
+def clip(text, limit=MAX_OUTPUT_BYTES):
+    if text is None:
+        return ""
+    if len(text) > limit:
+        return text[:limit] + "\n... (dipotong)"
+    return text
+
+
+def run(cmd, timeout=COMMAND_TIMEOUT):
+    """Run a command without a shell. Returns (returncode, combined output)."""
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+    except FileNotFoundError:
+        return 127, "perintah tidak ditemukan: " + str(cmd[0])
+    except subprocess.TimeoutExpired:
+        return 124, "timeout %ss: %s" % (timeout, " ".join(cmd))
+    except OSError as exc:
+        return 126, "gagal menjalankan %s: %s" % (cmd[0], exc)
+    output = proc.stdout or ""
+    if proc.stderr:
+        output = output + ("\n" if output else "") + proc.stderr
+    return proc.returncode, clip(output)
+
+
+def unit_active(unit):
+    code, out = run(systemctl_cmd() + ["is-active", unit], timeout=10)
+    state = (out or "").strip().splitlines()[0] if out.strip() else "unknown"
+    return code == 0 and state == "active", state
+
+
+def spool_dirs():
+    for path in (IN_DIR, OUT_DIR):
+        if not os.path.isdir(path):
+            os.makedirs(path, mode=0o750, exist_ok=True)
+        os.chmod(path, 0o750)
+        chown(path)
+    if not os.path.isdir(STATE_DIR):
+        os.makedirs(STATE_DIR, mode=0o700, exist_ok=True)
+    os.chmod(STATE_DIR, 0o700)
+
+
+def chown(path, user=HELPER_USER, group=None):
+    try:
+        uid = pwd.getpwnam(user).pw_uid
+    except KeyError:
+        return
+    gid = pwd.getpwnam(user).pw_gid
+    if group:
+        try:
+            gid = grp.getgrnam(group).gr_gid
+        except KeyError:
+            pass
+    os.chown(path, uid, gid)
+
+
+def parse_request(path):
+    if os.path.islink(path):
+        raise Reject("request berupa symlink")
+    try:
+        info = os.stat(path)
+    except OSError as exc:
+        raise Reject("tidak bisa membaca request: %s" % exc)
+    if info.st_size > MAX_REQUEST_BYTES:
+        raise Reject("request terlalu besar (%d byte)" % info.st_size)
+    if not os.environ.get("HELPER_TEST_MODE"):
+        try:
+            expected = pwd.getpwnam(HELPER_USER).pw_uid
+        except KeyError:
+            raise Reject("user %s tidak ada" % HELPER_USER)
+        if info.st_uid != expected:
+            raise Reject("request bukan milik user %s" % HELPER_USER)
+    with open(path, "r", encoding="utf-8") as handle:
+        raw = handle.read()
+    try:
+        data = json.loads(raw)
+    except ValueError as exc:
+        raise Reject("JSON tidak valid: %s" % exc)
+    if not isinstance(data, dict):
+        raise Reject("request harus objek JSON")
+    unknown = set(data) - ALLOWED_FIELDS
+    if unknown:
+        raise Reject("field tidak dikenal: " + ", ".join(sorted(unknown)))
+    request_id = str(data.get("id", ""))
+    if not ID_RE.match(request_id):
+        raise Reject("id tidak valid")
+    action = str(data.get("action", ""))
+    if action not in ACTIONS:
+        raise Reject("action tidak dikenal: " + action)
+    lines = data.get("lines", 100)
+    try:
+        lines = int(lines)
+    except (TypeError, ValueError):
+        raise Reject("lines harus angka")
+    if action == "logs" and not 1 <= lines <= 500:
+        raise Reject("lines harus 1-500")
+    token = str(data.get("token", ""))
+    if action == "tunnel-install" and not TOKEN_RE.match(token):
+        raise Reject("token tunnel tidak valid")
+    confirm = str(data.get("confirm", ""))
+    if action == "tunnel-logout" and confirm != "RESET":
+        raise Reject("tunnel-logout butuh confirm RESET")
+    try:
+        delay = int(data.get("delay", 0) or 0)
+    except (TypeError, ValueError):
+        raise Reject("delay harus angka")
+    delay = min(max(delay, 0), 10)
+    return {
+        "id": request_id,
+        "action": action,
+        "lines": lines,
+        "token": token,
+        "confirm": confirm,
+        "delay": delay,
+        "requested_by": str(data.get("requested_by", ""))[:200],
+    }
+
+
+def cooldown_path(action):
+    return os.path.join(STATE_DIR, "cooldown-" + action)
+
+
+def cooldown_remaining(action, seconds):
+    if seconds <= 0:
+        return 0
+    path = cooldown_path(action)
+    try:
+        last = os.stat(path).st_mtime
+    except OSError:
+        return 0
+    remaining = seconds - (time.time() - last)
+    return int(remaining) if remaining > 0 else 0
+
+
+def touch_cooldown(action):
+    path = cooldown_path(action)
+    try:
+        with open(path, "a", encoding="utf-8"):
+            os.utime(path, None)
+        os.chmod(path, 0o600)
+    except OSError as exc:
+        log("gagal menulis cooldown %s: %s" % (action, exc))
+
+
+def write_result(payload):
+    path = os.path.join(OUT_DIR, payload["id"] + ".json")
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as handle:
+        json.dump(payload, handle)
+        handle.flush()
+        os.fsync(handle.fileno())
+    os.chmod(tmp, 0o640)
+    chown(tmp)
+    os.replace(tmp, path)
+
+
+def action_service_status(_):
+    lines = []
+    ok = True
+    for unit in (APP_SERVICE + ".service", TUNNEL_SERVICE, BACKUP_TIMER):
+        active, state = unit_active(unit)
+        lines.append("%s: %s" % (unit, state))
+        if unit == APP_SERVICE + ".service" and not active:
+            ok = False
+    code, out = run(systemctl_cmd() + ["is-enabled", APP_SERVICE + ".service"], timeout=10)
+    lines.append("enabled: %s" % (out.strip() or "unknown"))
+    return ok, "\n".join(lines)
+
+
+def action_restart_service(request):
+    delay = request["delay"]
+    if delay:
+        time.sleep(delay)
+    code, out = run(systemctl_cmd() + ["restart", APP_SERVICE + ".service"], timeout=COMMAND_TIMEOUT)
+    return code == 0, out or "restart dikirim"
+
+
+def action_backup_now(_):
+    code, out = run(systemctl_cmd() + ["start", BACKUP_SERVICE], timeout=COMMAND_TIMEOUT)
+    if code != 0:
+        return False, out
+    code, result = run(systemctl_cmd() + ["show", "-p", "Result", "--value", BACKUP_SERVICE], timeout=10)
+    detail = (out + "\n" if out else "") + "result: " + (result.strip() or "unknown")
+    return result.strip() == "success", detail
+
+
+def action_logs(request):
+    code, out = run(
+        journalctl_cmd() + ["-u", APP_SERVICE + ".service", "-n", str(request["lines"]), "--no-pager", "--output=short-iso"],
+        timeout=COMMAND_TIMEOUT,
+    )
+    return code == 0, out
+
+
+def check_line(lines, ok, name, detail):
+    lines.append(("OK   " if ok else "BAD  ") + name + " " + detail)
+    return ok
+
+
+def action_doctor(_):
+    lines = []
+    ok = True
+
+    binary_ok = os.path.isfile(APP_BINARY) and os.access(APP_BINARY, os.X_OK)
+    ok &= check_line(lines, binary_ok, "binary", APP_BINARY)
+
+    env_ok = False
+    if os.path.isfile(ENV_FILE):
+        mode = os.stat(ENV_FILE).st_mode & 0o777
+        env_ok = mode == 0o640
+        check_line(lines, env_ok, "env file", "%s mode %o (harus 640)" % (ENV_FILE, mode))
+    else:
+        check_line(lines, False, "env file", ENV_FILE + " tidak ada")
+
+    data_ok = False
+    if os.path.isdir(DATA_DIR):
+        try:
+            info = os.stat(DATA_DIR)
+            owner = pwd.getpwuid(info.st_uid).pw_name
+            data_ok = owner == HELPER_USER
+            check_line(lines, data_ok, "data dir", "%s owner %s" % (DATA_DIR, owner))
+        except (KeyError, OSError):
+            check_line(lines, False, "data dir", DATA_DIR + " owner tidak terbaca")
+    else:
+        check_line(lines, False, "data dir", DATA_DIR + " tidak ada")
+
+    tunnel_cfg_ok = os.path.isfile(TUNNEL_CONFIG)
+    check_line(lines, tunnel_cfg_ok, "tunnel config", TUNNEL_CONFIG if tunnel_cfg_ok else "belum ada (pasang di panel Tunnel)")
+
+    cert_ok = os.path.isfile(TUNNEL_CERT)
+    check_line(lines, cert_ok, "tunnel cert", TUNNEL_CERT if cert_ok else "belum login tunnel")
+
+    active, state = unit_active(TUNNEL_SERVICE)
+    check_line(lines, active, TUNNEL_SERVICE, state)
+
+    timer_active, timer_state = unit_active(BACKUP_TIMER)
+    check_line(lines, timer_active, BACKUP_TIMER, timer_state)
+
+    worker_ok = os.path.isfile(os.path.join(WORKER_DIR, "wrangler.toml"))
+    check_line(lines, worker_ok, "worker source", WORKER_DIR)
+
+    ok &= tunnel_cfg_ok and cert_ok and active and timer_active and env_ok and data_ok
+    summary = "SEMUA OK" if ok else "ADA YANG PERLU DIPERBAIKI"
+    lines.append("")
+    lines.append(summary)
+    return ok, "\n".join(lines)
+
+
+def action_tunnel_status(_):
+    if not cloudflared_available():
+        return False, "cloudflared tidak terpasang"
+    code, out = run(cloudflared_cmd() + ["tunnel", "list", "--output", "json"], timeout=COMMAND_TIMEOUT)
+    active, state = unit_active(TUNNEL_SERVICE)
+    detail = "service %s: %s\n" % (TUNNEL_SERVICE, state)
+    return code == 0, detail + (out or "(tidak ada tunnel)")
+
+
+def action_tunnel_install(request):
+    if not cloudflared_available():
+        return False, "cloudflared tidak terpasang"
+    code, out = run(cloudflared_cmd() + ["service", "install", request["token"]], timeout=INSTALL_TIMEOUT)
+    if code != 0:
+        return False, out
+    code, enable_out = run(systemctl_cmd() + ["enable", "--now", TUNNEL_SERVICE], timeout=COMMAND_TIMEOUT)
+    time.sleep(2)
+    active, state = unit_active(TUNNEL_SERVICE)
+    return code == 0 and active, out + "\n" + enable_out + "\nservice: " + state
+
+
+def action_tunnel_restart(_):
+    code, out = run(systemctl_cmd() + ["restart", TUNNEL_SERVICE], timeout=COMMAND_TIMEOUT)
+    time.sleep(1)
+    active, state = unit_active(TUNNEL_SERVICE)
+    return code == 0 and active, (out + "\nservice: " + state)
+
+
+def action_tunnel_logout(_):
+    lines = []
+    for step in (
+        ["stop", TUNNEL_SERVICE],
+        ["disable", TUNNEL_SERVICE],
+    ):
+        code, out = run(systemctl_cmd() + step, timeout=COMMAND_TIMEOUT)
+        lines.append("systemctl %s -> %d %s" % (" ".join(step), code, out.strip()))
+    if cloudflared_available():
+        code, out = run(cloudflared_cmd() + ["service", "uninstall"], timeout=COMMAND_TIMEOUT)
+        lines.append("cloudflared service uninstall -> %d %s" % (code, out.strip()))
+    for target in (os.path.dirname(TUNNEL_CONFIG), os.path.dirname(TUNNEL_CERT)):
+        try:
+            shutil.rmtree(target)
+            lines.append("hapus " + target)
+        except FileNotFoundError:
+            lines.append("sudah tidak ada " + target)
+        except OSError as exc:
+            lines.append("gagal hapus %s: %s" % (target, exc))
+            return False, "\n".join(lines)
+    return True, "\n".join(lines)
+
+
+HANDLERS = {
+    "service-status": action_service_status,
+    "restart-service": action_restart_service,
+    "backup-now": action_backup_now,
+    "logs": action_logs,
+    "doctor": action_doctor,
+    "tunnel-status": action_tunnel_status,
+    "tunnel-install": action_tunnel_install,
+    "tunnel-restart": action_tunnel_restart,
+    "tunnel-logout": action_tunnel_logout,
+}
+
+
+def process(path):
+    started = time.time()
+    request_id = os.path.basename(path).removesuffix(".json")
+    try:
+        request = parse_request(path)
+        request_id = request["id"]
+    except Reject as exc:
+        log("tolak %s: %s" % (os.path.basename(path), exc))
+        os.unlink(path)
+        if ID_RE.match(request_id):
+            write_result({
+                "id": request_id,
+                "action": "",
+                "ok": False,
+                "status": "rejected",
+                "output": "",
+                "error": str(exc),
+                "finished_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                "seconds": round(time.time() - started, 2),
+            })
+        return
+
+    action = request["action"]
+    cooldown, fire_and_forget = ACTIONS[action]
+    remaining = cooldown_remaining(action, cooldown)
+    if remaining > 0:
+        log("cooldown %s: %ds tersisa (diminta oleh %s)" % (action, remaining, request["requested_by"] or "?"))
+        os.unlink(path)
+        write_result({
+            "id": request["id"],
+            "action": action,
+            "ok": False,
+            "status": "rejected",
+            "output": "",
+            "error": "cooldown %s: tunggu %d detik" % (action, remaining),
+            "finished_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "seconds": round(time.time() - started, 2),
+        })
+        return
+
+    log("jalankan %s (id=%s, oleh %s)" % (action, request["id"], request["requested_by"] or "?"))
+    os.unlink(path)
+    touch_cooldown(action)
+    try:
+        ok, output = HANDLERS[action](request)
+    except Exception as exc:  # helper must always answer the app
+        ok, output = False, "helper error: %s" % exc
+    write_result({
+        "id": request["id"],
+        "action": action,
+        "ok": bool(ok),
+        "status": "completed" if ok else "failed",
+        "output": clip(output),
+        "error": "" if ok else "aksi gagal",
+        "finished_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "seconds": round(time.time() - started, 2),
+    })
+    log("%s -> %s (%s)" % (action, "ok" if ok else "gagal", request["id"]))
+
+
+def prune_results(max_age=3600):
+    """Keep the result dir bounded: fire-and-forget results are never read by the app, and a
+    crashed run can leave a partial file behind."""
+    try:
+        names = os.listdir(OUT_DIR)
+    except OSError:
+        return
+    now = time.time()
+    for name in names:
+        path = os.path.join(OUT_DIR, name)
+        if name.endswith(".tmp"):
+            age_limit = 60
+        elif name.endswith(".json"):
+            age_limit = max_age
+        else:
+            continue
+        try:
+            if now - os.stat(path).st_mtime > age_limit:
+                os.unlink(path)
+        except OSError:
+            continue
+
+
+def pending():
+    try:
+        names = sorted(name for name in os.listdir(IN_DIR) if name.endswith(".json"))
+    except OSError:
+        return []
+    return [os.path.join(IN_DIR, name) for name in names]
+
+
+def process_once():
+    spool_dirs()
+    prune_results()
+    for path in pending()[:MAX_JOBS_PER_RUN]:
+        process(path)
+
+
+def watch():
+    stopping = {"stop": False}
+
+    def handle_term(_signum, _frame):
+        stopping["stop"] = True
+
+    signal.signal(signal.SIGTERM, handle_term)
+    signal.signal(signal.SIGINT, handle_term)
+    spool_dirs()
+    log("watch mode aktif di " + IN_DIR)
+    while not stopping["stop"]:
+        process_once()
+        time.sleep(2)
+    log("watch mode berhenti")
+
+
+def main():
+    parser = argparse.ArgumentParser(description="TempMail root helper")
+    parser.add_argument("--once", action="store_true", help="proses request yang tertunda lalu keluar")
+    parser.add_argument("--watch", action="store_true", help="pantau spool terus-menerus")
+    parser.add_argument("--version", action="version", version="tempmail-root 1")
+    args = parser.parse_args()
+
+    if os.geteuid() != 0 and not os.environ.get("HELPER_TEST_MODE"):
+        log("helper ini harus dijalankan sebagai root (systemd unit tempmail-root.service)")
+        return 2
+    if args.watch:
+        watch()
+        return 0
+    process_once()
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

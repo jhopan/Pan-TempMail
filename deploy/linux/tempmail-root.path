@@ -1,0 +1,8 @@
+[Unit]
+Description=Watch the TempMail helper spool directory
+
+[Path]
+DirectoryNotEmpty=/opt/tempmail/data/helper/in
+
+[Install]
+WantedBy=paths.target
