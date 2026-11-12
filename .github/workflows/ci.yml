@@ -22,6 +22,7 @@ jobs:
         with:
           go-version-file: receiver/go.mod
           cache: true
+          cache-dependency-path: receiver/go.sum
 
       - name: gofmt
         working-directory: receiver

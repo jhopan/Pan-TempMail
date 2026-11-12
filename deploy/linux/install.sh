@@ -488,9 +488,6 @@ if ! command -v cloudflared >/dev/null 2>&1; then
   fi
 fi
 
-printf '%s\n' "$VERSION" > "$ROOT/VERSION"
-chmod 0644 "$ROOT/VERSION"
-
 systemctl daemon-reload
 if [ "$UPDATE" = "1" ]; then
   systemctl restart "$SERVICE"
@@ -505,6 +502,9 @@ for _ in $(seq 1 20); do
 done
 
 NEW_VERSION=$("$ROOT/tempmail" --version 2>/dev/null || echo "?")
+# Berkas VERSION memuat versi yang benar-benar terpasang, bukan kata "latest".
+printf '%s\n' "$NEW_VERSION" > "$ROOT/VERSION"
+chmod 0644 "$ROOT/VERSION"
 
 if [ "$healthy" = "0" ] && [ -f "$ROOT/tempmail.prev" ]; then
   log "health check gagal; mengembalikan biner sebelumnya ..."
