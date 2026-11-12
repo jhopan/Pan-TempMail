@@ -38,7 +38,7 @@ No Maddy, PostgreSQL, Node.js runtime, Nginx, or public port 25 is required for 
 | `receiver/repository` | SQL operations; DB-dialect placeholders |
 | `receiver/database` | SQLite default, optional PostgreSQL connection/migrations |
 | `receiver/cleanup` | TTL purge and SQLite optimization |
-| `receiver/web` | `go:embed` static UI: inbox (`/app/`) plus the sidebar admin panel (`/admin`) |
+| `receiver/web` | `go:embed` static UI: inbox (`/app/`) plus the sidebar admin panel (`/admin`, landing panel `Dashboard`) |
 
 ## Data model
 

@@ -2,7 +2,7 @@
 // Dipisah dari admin.js supaya logika data tidak perlu diubah saat tata letak berganti.
 
 const NAV_PANELS = {
-  status: ["Status", "Kondisi helper root, aplikasi, database, dan koneksi Cloudflare."],
+  dashboard: ["Dashboard", "Angka penting, hal yang butuh tindakan, dan fakta helper, aplikasi, database, Cloudflare."],
   server: ["Server", "Aksi sistem lewat helper root: service, backup, log, doctor, konektor cloudflared."],
   cloudflare: ["Akun Cloudflare", "Profil akun Cloudflare beserta API token dan status Worker."],
   domains: ["Domain temp mail", "Domain beserta status routing catch-all ke Worker."],
@@ -13,7 +13,7 @@ const NAV_PANELS = {
   naming: ["Aturan nama", "Pola local-part inbox yang dibuat otomatis saat username tidak diisi."],
   diagnostics: ["Diagnostik", "Fakta helper, aplikasi, database, dan Cloudflare dalam satu layar baca."],
 };
-const NAV_DEFAULT = "status";
+const NAV_DEFAULT = "dashboard";
 
 const navEl = document.getElementById("shellNav");
 const navScrim = document.getElementById("navScrim");

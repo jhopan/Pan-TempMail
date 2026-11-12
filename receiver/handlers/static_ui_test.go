@@ -33,7 +33,7 @@ func TestAdminPanelMarkupCarriesEveryPanel(t *testing.T) {
 	router.ServeHTTP(recorder, request)
 	body := recorder.Body.String()
 
-	for _, panel := range []string{"status", "server", "diagnostics", "users", "naming", "cloudflare", "domains", "tunnel", "copies", "import"} {
+	for _, panel := range []string{"dashboard", "server", "diagnostics", "users", "naming", "cloudflare", "domains", "tunnel", "copies", "import"} {
 		if !strings.Contains(body, `data-panel="`+panel+`"`) {
 			t.Errorf("panel %q tidak ada di admin.html", panel)
 		}
@@ -41,10 +41,13 @@ func TestAdminPanelMarkupCarriesEveryPanel(t *testing.T) {
 	if strings.Count(body, `<section class="panel card" data-panel=`) != 10 {
 		t.Errorf("jumlah panel != 10")
 	}
-	if strings.Count(body, `<section class="panel card" data-panel="status"`) == 0 {
-		t.Errorf("panel status wajib ada sebagai default")
+	if strings.Count(body, `<section class="panel card" data-panel="dashboard"`) == 0 {
+		t.Errorf("panel dashboard wajib ada sebagai default")
+	}
+	if strings.Contains(body, `<section class="panel card" data-panel="status"`) {
+		t.Errorf("panel status lama harus sudah digantikan dashboard")
 	}
 	if strings.Count(body, "hidden>") < 9 {
-		t.Errorf("panel selain status harus hidden secara default agar tidak berkedip")
+		t.Errorf("panel selain dashboard harus hidden secara default agar tidak berkedip")
 	}
 }

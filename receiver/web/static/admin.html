@@ -9,7 +9,7 @@
     :root{
       --bg:#0a0a0f;--surface:#12121a;--surface-2:#171722;--border:#1e1e2e;--text:#e2e8f0;
       --muted:#94a3b8;--brand:#8b5cf6;--brand-d:#7c3aed;
-      --green:#22c55e;--red:#ef4444;--blue:#3b82f6;--radius:10px;
+      --green:#22c55e;--red:#ef4444;--blue:#3b82f6;--yellow:#eab308;--radius:10px;
     }
     body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
       background:var(--bg);color:var(--text);min-height:100vh}
@@ -53,7 +53,7 @@
     .view-title b{font-size:14px}
     .view-title span{display:block;font-size:11px;color:var(--muted);max-width:62ch}
     .view-tools{margin-left:auto;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
-    .view-body{flex:1;padding:18px;display:flex;flex-direction:column;gap:14px;width:100%;max-width:1100px}
+    .view-body{flex:1;padding:18px 20px 28px;display:flex;flex-direction:column;gap:14px;width:100%}
     .panel{display:flex;flex-direction:column;gap:11px}
     .panel h2{font-size:15px;font-weight:700}
     h3{font-size:12px;font-weight:600;color:var(--muted);margin:12px 0 6px}
@@ -137,6 +137,22 @@
     .out-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:8px}
     .out-head h3{margin:0}
     .token-input{margin-top:6px;font-size:12px;padding:8px 10px}
+    .tiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:12px}
+    .tile{background:var(--surface-2);border:1px solid var(--border);border-radius:9px;padding:12px 13px;
+      display:flex;flex-direction:column;gap:5px}
+    .tile-label{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)}
+    .tile-value{font-size:20px;font-weight:700;line-height:1.1;word-break:break-word}
+    .tile-sub{font-size:11px;color:var(--muted);word-break:break-word}
+    .tile.ok .tile-value{color:var(--green)}
+    .tile.warn .tile-value{color:var(--yellow)}
+    .tile.bad .tile-value{color:var(--red)}
+    .alert-list{list-style:none;display:flex;flex-direction:column;gap:8px;font-size:13px;margin-top:6px}
+    .alert-list li{display:flex;align-items:flex-start;gap:8px;border-radius:9px;padding:10px 12px;
+      background:rgba(234,179,8,.08);border:1px solid rgba(234,179,8,.35)}
+    .alert-list li.bad{background:rgba(239,68,68,.08);border-color:rgba(239,68,68,.35)}
+    .alert-list li.ok{background:rgba(34,197,94,.08);border-color:rgba(34,197,94,.3)}
+    .alert-list li a{white-space:nowrap}
+    .btn{text-decoration:none;display:inline-flex;align-items:center;gap:6px}
     .modal{position:fixed;inset:0;background:rgba(0,0,0,.72);display:flex;align-items:center;
       justify-content:center;padding:16px;z-index:50}
     .modal-box{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);
@@ -180,8 +196,8 @@
 
       <nav class="nav-group" aria-label="Bagian panel">
         <p>Ringkasan</p>
-        <button class="nav-item" type="button" data-panel="status">Status
-          <small>helper, aplikasi, database</small></button>
+        <button class="nav-item" type="button" data-panel="dashboard">Dashboard
+          <small>ringkasan &amp; tindakan</small></button>
         <button class="nav-item" type="button" data-panel="server">Server
           <small>service, backup, log, doctor</small></button>
         <button class="nav-item" type="button" data-panel="diagnostics">Diagnostik
@@ -239,11 +255,11 @@
 
       <main class="view-body" id="panel">
 
-        <section class="panel card" data-panel="status" aria-labelledby="hStatus">
+        <section class="panel card" data-panel="dashboard" aria-labelledby="hDashboard">
           <div class="card-head">
             <div>
-              <h2 id="hStatus">Status</h2>
-              <p class="note">Fakta lokal dari aplikasi: helper root, proses, database, dan ringkasan Cloudflare.</p>
+              <h2 id="hDashboard">Dashboard</h2>
+              <p class="note">Ringkasan yang dibaca lebih dulu: angka penting, hal yang butuh tindakan, lalu fakta mentah helper, aplikasi, database, dan Cloudflare.</p>
             </div>
             <div class="row-actions">
               <button id="testConnBtn" class="btn btn-s small" type="button">Test koneksi</button>
@@ -253,26 +269,40 @@
           <div id="statusOut" class="out" role="status" aria-live="polite"></div>
           <div id="serverState" class="state" role="status"></div>
           <div id="serverWrap" hidden>
-            <div class="cards-2">
-              <div>
-                <h3>Helper root</h3>
-                <dl class="kv" id="svHelper"></dl>
-              </div>
-              <div>
-                <h3>Aplikasi</h3>
-                <dl class="kv" id="svApp"></dl>
-              </div>
-              <div>
-                <h3>Database</h3>
-                <dl class="kv" id="svDb"></dl>
-              </div>
-              <div>
-                <h3>Cloudflare</h3>
-                <dl class="kv" id="svCf"></dl>
-              </div>
-            </div>
+            <div class="tiles" id="dbTiles"></div>
           </div>
           <div id="svHelperNote" class="note warn" hidden></div>
+          <div id="dbAlertsWrap" hidden>
+            <h3>Perlu tindakan</h3>
+            <ul class="alert-list" id="dbAlerts"></ul>
+          </div>
+          <h3>Pintasan</h3>
+          <div class="row-actions">
+            <a class="btn btn-s small" href="#server">Aksi server</a>
+            <a class="btn btn-s small" href="#cloudflare">Akun Cloudflare</a>
+            <a class="btn btn-s small" href="#domains">Domain</a>
+            <a class="btn btn-s small" href="#tunnel">Tunnel</a>
+            <a class="btn btn-s small" href="#diagnostics">Diagnostik</a>
+            <a class="btn btn-s small" href="#users">Pengguna</a>
+          </div>
+          <div id="dbDetails" class="cards-2" hidden>
+            <div>
+              <h3>Helper root</h3>
+              <dl class="kv" id="svHelper"></dl>
+            </div>
+            <div>
+              <h3>Aplikasi</h3>
+              <dl class="kv" id="svApp"></dl>
+            </div>
+            <div>
+              <h3>Database</h3>
+              <dl class="kv" id="svDb"></dl>
+            </div>
+            <div>
+              <h3>Cloudflare</h3>
+              <dl class="kv" id="svCf"></dl>
+            </div>
+          </div>
         </section>
 
         <section class="panel card" data-panel="diagnostics" aria-labelledby="hDiagnostics" hidden>

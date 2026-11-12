@@ -101,7 +101,8 @@ Empty destination list means OFF. A copy destination must be verified by Cloudfl
 
 ### Admin panel sections
 
-- `Status` (helper, app, database, Cloudflare), `Server` (helper actions), `Diagnostik` (read-only facts from both status endpoints), `Akun Cloudflare`, `Domain`, `Tunnel`, `Salinan email`, `Impor state`, plus `Pengguna` (create user, change role, reset password, delete) and `Aturan nama` (edit the auto-generated inbox naming rules).
+- `Dashboard` (landing: status helper, angka penting profil/domain/Worker/tunnel/inbox/database, daftar hal yang butuh tindakan, pintasan ke panel lain, plus fakta mentah helper, aplikasi, database, Cloudflare), `Server` (helper actions), `Diagnostik` (fakta mentah kedua endpoint status dalam satu layar), `Akun Cloudflare`, `Domain`, `Tunnel`, `Salinan email`, `Impor state`, `Pengguna` (create user, change role, reset password, delete), dan `Aturan nama` (edit the auto-generated inbox naming rules).
+- The content column spans the available width (no fixed max width) so tables and riwayat log tidak menyisakan ruang kosong di layar lebar.
 - Every panel lists its data with loading, empty, and error states, and every control calls a real endpoint.
 - Password fields are write-only: sent once, cleared, never rendered back.
 

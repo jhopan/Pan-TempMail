@@ -78,6 +78,10 @@ const ui = {
   svDb: document.getElementById('svDb'),
   svCf: document.getElementById('svCf'),
   svHelperNote: document.getElementById('svHelperNote'),
+  dbTiles: document.getElementById('dbTiles'),
+  dbAlerts: document.getElementById('dbAlerts'),
+  dbAlertsWrap: document.getElementById('dbAlertsWrap'),
+  dbDetails: document.getElementById('dbDetails'),
   svServiceBtn: document.getElementById('svServiceBtn'),
   svLogLines: document.getElementById('svLogLines'),
   svLogBtn: document.getElementById('svLogBtn'),
@@ -462,6 +466,7 @@ async function testConnection(btn) {
     message(ui.statusOut, 'ok', line,
       'api_base ' + status.api_base + ', profil ' + (status.profiles || []).length + ', domain ' + (status.domains || []).length +
       ', worker ' + status.worker_name + ' (' + status.worker_compat_date + '), tunnel ' + (status.tunnel ? status.tunnel.status : '-'));
+    renderDashboard(state.system || {}, status, null);
   } catch (err) {
     const info = apiFailure(err);
     message(ui.statusOut, 'error', info.message, info.detail);
@@ -730,6 +735,116 @@ function renderSystem() {
   ]);
 }
 
+function tile(label, value, sub, tone) {
+  const box = node('div', 'tile' + (tone ? ' ' + tone : ''));
+  box.append(node('span', 'tile-label', label), node('b', 'tile-value', value));
+  if (sub) box.append(node('span', 'tile-sub', sub));
+  return box;
+}
+
+function panelLink(href, label) {
+  const link = document.createElement('a');
+  link.href = href;
+  link.className = 'btn btn-s small';
+  link.textContent = label;
+  return link;
+}
+
+// Ringkasan angka dan hal yang butuh tindakan; sumbernya dua endpoint status yang sudah ada.
+function renderDashboard(sys, cf, cfError) {
+  const helper = (sys && sys.helper) || {};
+  const app = (sys && sys.app) || {};
+  const db = (sys && sys.db) || {};
+  const profiles = (cf && cf.profiles) || [];
+  const domains = (cf && cf.domains) || [];
+  const tunnel = (cf && cf.tunnel) || {};
+  const copies = (cf && cf.copies) || [];
+  const active = profiles.filter(function (p) { return p.active; })[0] || null;
+  const routed = domains.filter(function (d) { return d.routing; });
+  const withoutToken = profiles.filter(function (p) { return !p.has_token; });
+  const withWorker = profiles.filter(function (p) { return p.worker_deployed; });
+
+  ui.dbTiles.replaceChildren(
+    tile('Helper root',
+      helper.installed ? 'Terpasang' : 'Belum',
+      helper.installed ? (countOf(helper.pending) ? countOf(helper.pending) + ' request tertunda' : 'tidak ada request tertunda') : 'aksi Server tidak aktif',
+      helper.installed ? 'ok' : 'bad'),
+    tile('Profil Cloudflare', String(profiles.length),
+      active ? 'aktif: ' + active.id : 'belum ada profil aktif',
+      profiles.length ? (active ? 'ok' : 'warn') : 'warn'),
+    tile('Routing domain', routed.length + '/' + domains.length,
+      domains.length ? 'catch-all menuju Worker' : 'belum ada domain terdaftar',
+      domains.length && routed.length === domains.length ? 'ok' : 'warn'),
+    tile('API token', (profiles.length - withoutToken.length) + '/' + profiles.length,
+      withoutToken.length ? withoutToken.length + ' profil belum ada token' : (profiles.length ? 'semua profil siap' : 'belum ada profil'),
+      withoutToken.length ? 'warn' : (profiles.length ? 'ok' : 'warn')),
+    tile('Worker', withWorker.length ? 'Ter-deploy' : 'Belum',
+      withWorker.length ? withWorker.map(function (p) { return p.id; }).join(', ') : (cf && cf.worker_name) || '-',
+      withWorker.length ? 'ok' : 'warn'),
+    tile('Tunnel', tunnel.status || 'unknown',
+      tunnel.web_host || 'web host belum diisi',
+      tunnel.status === 'healthy' ? 'ok' : (tunnel.error ? 'bad' : 'warn')),
+    tile('Inbox', String(countOf(db.inboxes)),
+      'pesan ' + countOf(db.messages) + ', lampiran ' + countOf(db.attachments)),
+    tile('Database', formatBytes(db.bytes), db.path || '-'),
+    tile('Aplikasi', formatUptime(app.uptime_seconds),
+      'RAM ' + formatMb(app.rss_bytes) + ', Go ' + (app.go_version || '-')),
+    tile('Salinan email', copies.length ? String(copies.length) + ' alamat' : 'OFF',
+      copies.length ? 'berlaku setelah deploy Worker' : 'tidak menyalin ke mana pun'),
+  );
+  ui.dbDetails.hidden = false;
+
+  const alerts = [];
+  if (!helper.installed) {
+    alerts.push(['bad', 'Helper root belum dipasang, jadi restart, backup, log, dan aksi tunnel tidak bisa dijalankan dari panel.', '#server', 'Buka Server']);
+  }
+  if (!profiles.length) {
+    alerts.push(['warn', 'Belum ada profil Cloudflare, jadi tambah domain dan deploy Worker belum bisa dilakukan.', '#cloudflare', 'Tambah profil']);
+  }
+  if (withoutToken.length) {
+    alerts.push(['warn', withoutToken.length + ' profil belum punya API token: ' + withoutToken.map(function (p) { return p.id; }).join(', ') + '.', '#cloudflare', 'Tempel token']);
+  }
+  const notRouted = domains.filter(function (d) { return !d.routing; });
+  if (notRouted.length) {
+    alerts.push(['warn', notRouted.length + ' domain belum routing aktif: ' + notRouted.map(function (d) { return d.domain; }).join(', ') + '.', '#domains', 'Aktifkan routing']);
+  }
+  if (!tunnel.web_host) {
+    alerts.push(['warn', 'Web host tunnel belum diisi, Worker akan mengirim ke URL kosong.', '#tunnel', 'Isi web host']);
+  }
+  if (tunnel.error) {
+    alerts.push(['warn', 'Status tunnel dari Cloudflare: ' + tunnel.error, '#tunnel', 'Periksa tunnel']);
+  }
+  if (copies.length && !withWorker.length) {
+    alerts.push(['warn', 'Tujuan salinan sudah diset tapi belum ada Worker ter-deploy, jadi salinan belum dipakai.', '#copies', 'Lihat salinan']);
+  }
+  if (cfError) {
+    alerts.push(['warn', 'Status Cloudflare tidak terbaca: ' + (cfError.message || cfError) + '.', '#diagnostics', 'Lihat Diagnostik']);
+  }
+
+  if (alerts.length) {
+    ui.dbAlerts.replaceChildren(...alerts.map(function (item) {
+      const li = node('li', item[0], item[1]);
+      li.append(panelLink(item[2], item[3]));
+      return li;
+    }));
+  } else {
+    ui.dbAlerts.replaceChildren(node('li', 'ok', 'Tidak ada yang perlu ditindak sekarang.'));
+  }
+  ui.dbAlertsWrap.hidden = false;
+}
+
+async function refreshDashboard() {
+  if (!ui.dbTiles) return;
+  let cfStatus = null;
+  let cfError = null;
+  try {
+    cfStatus = await cf('/status');
+  } catch (err) {
+    cfError = withRequestId(err);
+  }
+  renderDashboard(state.system || {}, cfStatus || {}, cfError);
+}
+
 function enterHelperMissing(err) {
   state.systemHelper = false;
   const info = apiFailure(err);
@@ -764,6 +879,7 @@ async function loadSystemStatus() {
     state.system = out;
     state.systemHelper = !!(state.system.helper && state.system.helper.installed);
     renderSystem();
+    refreshDashboard();
   } catch (err) {
     if (err && err.status === 501) {
       enterHelperMissing(err);
