@@ -10,6 +10,9 @@
       --bg:#0a0a0f;--surface:#12121a;--surface-2:#171722;--border:#1e1e2e;--text:#e2e8f0;
       --muted:#94a3b8;--brand:#8b5cf6;--brand-d:#7c3aed;
       --green:#22c55e;--red:#ef4444;--blue:#3b82f6;--yellow:#eab308;--radius:10px;
+      /* Teks merah/aksen di atas latar bertinta butuh versi lebih terang agar lolos WCAG AA:
+         #f87171 = 5.8:1 di badge off, #a78bfa = 6.5:1 untuk glif kartu aksi. */
+      --red-ink:#f87171;--brand-ink:#a78bfa;
     }
     body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
       background:var(--bg);color:var(--text);min-height:100vh}
@@ -17,7 +20,7 @@
     ::-webkit-scrollbar-thumb{background:#2b2b3a;border-radius:4px}
     ::-webkit-scrollbar-thumb:hover{background:#3a3a4d}
     a{color:var(--blue);text-decoration:none}
-    :focus-visible{outline:2px solid var(--brand);outline-offset:2px}
+    :focus-visible{outline:2px solid var(--brand-ink);outline-offset:2px}
     [hidden]{display:none !important}
 
     /* layout shell */
@@ -77,7 +80,7 @@
     .btn.small{padding:8px 11px;font-size:12px}
     .btn-p{background:var(--brand-d);color:#fff}.btn-p:hover{background:#6d28d9}
     .btn-s{background:#22222f;color:var(--text);border-color:var(--border)}.btn-s:hover{background:#2c2c3d}
-    .btn-danger{background:rgba(239,68,68,.15);color:var(--red);border-color:rgba(239,68,68,.3)}
+    .btn-danger{background:rgba(239,68,68,.15);color:var(--red-ink);border-color:rgba(239,68,68,.3)}
     .btn-danger:hover{background:rgba(239,68,68,.3)}
     .btn:disabled{opacity:.45;cursor:not-allowed}
     input,select,textarea{font-family:inherit;background:var(--bg);border:1px solid var(--border);
@@ -104,7 +107,7 @@
     .badge{display:inline-block;padding:3px 9px;border-radius:999px;font-size:11px;
       border:1px solid var(--border);color:var(--muted);white-space:nowrap}
     .badge.on{color:var(--green);border-color:rgba(34,197,94,.35);background:rgba(34,197,94,.12)}
-    .badge.off{color:var(--red);border-color:rgba(239,68,68,.35);background:rgba(239,68,68,.1)}
+    .badge.off{color:var(--red-ink);border-color:rgba(239,68,68,.35);background:rgba(239,68,68,.1)}
     .state{border:1px dashed var(--border);border-radius:9px;padding:13px;font-size:13px;color:var(--muted)}
     .state.loading{display:flex;align-items:center;gap:8px}
     .state.error{border-style:solid;border-color:rgba(239,68,68,.4);color:#fca5a5;background:rgba(239,68,68,.06)}
@@ -193,7 +196,7 @@
       background:var(--surface-2);border:1px solid var(--border);border-radius:9px;padding:11px 12px;
       color:var(--text);cursor:pointer;font:inherit;min-height:66px;transition:border-color .15s}
     .action-tile:hover{border-color:var(--brand)}
-    .action-tile i{font-style:normal;font-size:17px;line-height:1;color:var(--brand)}
+    .action-tile i{font-style:normal;font-size:17px;line-height:1;color:var(--brand-ink)}
     .action-tile b{font-size:13px;font-weight:600}
     .action-tile small{font-size:11px;color:var(--muted)}
     .action-tile.danger i{color:var(--red)}
@@ -253,7 +256,7 @@
     @media (max-width:640px){
       .grid,.grid.cols-3,.cards-2{grid-template-columns:minmax(0,1fr)}
       .kv{grid-template-columns:minmax(0,1fr)}
-      .btn,.check,input,select,.nav-item{min-height:44px}
+      .btn,.check,input,select,.nav-item,.chip,.action-tile{min-height:44px}
       .table-wrap{max-height:none;border:0;overflow:visible}
       thead{display:none}
       table,tbody,tr,td{display:block;width:100%}
@@ -808,8 +811,8 @@
     </div>
   </div>
 
-  <script src="/app/app.js?v=13"></script>
-  <script src="/app/admin.js?v=13"></script>
-  <script src="/app/admin-nav.js?v=13"></script>
+  <script src="/app/app.js?v=14"></script>
+  <script src="/app/admin.js?v=14"></script>
+  <script src="/app/admin-nav.js?v=14"></script>
 </body>
 </html>

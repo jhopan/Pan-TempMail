@@ -41,8 +41,10 @@ Aturan: satu aksen saja. Status bukan aksen. Tanpa gradient latar, tanpa glow, t
 
 ## Bentuk dan susunan
 
-- Sidebar tetap 252px (drawer 278px di mobile), kolom isi maksimum 1100px: lebar baca nyaman dan tetap
-  utuh di 1360px sampai 360px.
+- Sidebar tetap 252px (drawer 278px di mobile). Kolom isi **selebar layar** tanpa batas maksimum:
+  panel ini dibaca di layar lebar (tabel domain, log, keluaran helper), dan ruang kosong di kanan
+  tidak memberi nilai. Sisa lebar hanya untuk padding. Tetap utuh dari 1360px sampai 360px.
+  (Diperbarui 2026-11-12: keputusan pemilik, batas 1100px lama dihapus.)
 - Radius 8-10px konsisten; `999px` hanya untuk badge status, supaya bentuk itu tetap punya arti.
 - Kartu untuk satu blok data, tabel untuk daftar yang bisa tumbuh, `dl` (kv) untuk fakta pasangan
   label-nilai, `pre` untuk keluaran panjang. Tiap seksi memakai bentuk yang paling cocok, bukan satu
@@ -50,6 +52,26 @@ Aturan: satu aksen saja. Status bukan aksen. Tanpa gradient latar, tanpa glow, t
 - Kepadatan: padding 14-15px di kartu, 9-11px di sel tabel, jarak antar blok 14px. Konsisten supaya mata
   tahu ke mana harus melompat.
 - Aksen kiri 2px pada item nav aktif: penanda posisi, bukan hiasan kartu.
+
+### Papan status (Dashboard)
+
+Tiap bentuk punya alasan satu baris, bukan dekorasi:
+
+| Bentuk | Menjawab pertanyaan | Alasan |
+|---|---|---|
+| Cincin kesiapan | "berapa banyak yang siap" | persentase terbaca lebih cepat sebagai busur daripada sebagai angka |
+| Alur email (6 simpul berwarna) | "kalau email tidak masuk, putus di mana" | urutan nyata jalur surat, bukan diagram hiasan |
+| Grafik 24 jam | "ada aktivitas atau tidak" | pola jam terlihat, angka total saja tidak menunjukkan waktu |
+| Ubin angka (inbox, database, RAM) | "seberapa besar dan seberapa penuh" | angka besar + bar RAM terhadap target 100 MB |
+| Kisi titik aspek | "komponen mana yang merah" | delapan komponen dalam satu pandangan, warna = status nyata |
+| Kartu aksi (ikon + label + baris kecil) | "apa yang bisa saya lakukan" | target sentuh besar, aksi merusak diberi warna merah |
+| Chip panjang log (50/100/200/500) | "berapa banyak log" | satu nilai aktif dari empat, lebih ringkas daripada select |
+| Dot grid fakta host (tunnel/unit/domain) | "bagaimana keadaan sebenarnya di server" | satu titik per komponen, nilainya teks kecil |
+
+- Ikon pada kartu aksi hanya bentuk yang punya arti langsung: `◍` status, `⤓` backup/salinan keluar,
+  `✚` periksa/doctor, `⟳` restart. Tidak ada ikon hiasan, tidak ada panah di tiap tombol. Glif dipakai
+  karena tiga dari empat aksi adalah operasi sistem (bukan konsep produk) dan teksnya sudah menjelaskan;
+  glif hanya pemandum cepat, bukan pengganti label.
 
 ## Gerak
 
@@ -62,6 +84,18 @@ tanpa parallax. `prefers-reduced-motion` mematikan transisi.
    "apakah semuanya hidup".
 2. **Label teknis berbahasa Indonesia** yang menyebut tindakan nyata (`Simpan token`, `Enable routing`),
    bukan istilah pemasaran.
+3. **Titik status** (kisi `dotgrid`): satu titik per komponen, hijau siap, kuning perlu dicek, merah
+   bermasalah. Muncul identik di Dashboard, Diagnostik, Server, dan Tunnel supaya satu warna selalu
+   berarti hal yang sama di seluruh panel.
+
+## Fokus dan papan ketik
+
+- `:focus-visible` = garis 2px warna aksen + offset 2px, di semua kontrol (termasuk tombol nav, chip,
+  kartu aksi). Tidak ada `outline: none` tanpa pengganti.
+- Urutan Tab mengikuti urutan visual: sidebar dulu (11 panel), lalu isi panel, lalu kaki sidebar.
+- Modal: fokus masuk ke tombol tutup saat dibuka, `Escape` menutup, fokus kembali ke tombol pemicu.
+- Di layar ≤640px semua kontrol yang bisa disentuh minimal 44px tinggi (`.btn`, `.chip`, `.action-tile`,
+  `input`, `select`, `.nav-item`).
 
 ## Jangan
 

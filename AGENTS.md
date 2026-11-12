@@ -205,9 +205,10 @@ Untuk pekerjaan UI, teks, aksesibilitas, layout mobile, atau komentar kode: baca
 desain) lalu terapkan aturan antislop.
 
 - Core (aktif): `C:\Users\ACER\.agents\skills\antislop\SKILL.md`
-- Sub-skill **belum terpasang**. Letakkan folder dari rilis yang cocok dengan core ini di
-  `C:\Users\ACER\.agents\skills\antislop\skills\<nama>\` sebelum dipakai:
-  `antislop-ui`, `antislop-layoutmobile`, `antislop-human` (butuh `contrast-check.py`),
-  `antislop-copywriting`, `antislop-code`.
+- Sub-skill yang **dipilih pemilik** (2026-11-12): `antislop-ui`, `antislop-layoutmobile`,
+  `antislop-human` (butuh `contrast-check.py`), `antislop-copywriting`, `antislop-code`.
+  Status: folder belum ada di disk. Letakkan dari rilis yang cocok dengan core ini di
+  `C:\Users\ACER\.agents\skills\antislop\skills\<nama>\SKILL.md`, lalu baca sebelum kerja terkait.
+  Sampai folder itu ada, yang berlaku hanya aturan di SKILL.md (core).
 - Mode kerja: **DURING**, terapkan aturan sambil menulis dan tutup dengan laporan Delivery Gate.
 <!-- antislop:end -->

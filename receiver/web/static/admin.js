@@ -1528,7 +1528,7 @@ function renderDashboard(sys, cf, cfError) {
   }
   if (tunnel.error) {
     alerts.push(['warn', 'Tunnel: info Cloudflare belum terbaca', '#tunnel', 'Cek konektor',
-      tunnel.error + ' — konektor cloudflared di server tetap jalan; buktikan lewat tombol Cek konektor tanpa API token.']);
+      tunnel.error + '. Konektor cloudflared di server tetap jalan; buktikan lewat tombol Cek konektor tanpa API token.']);
   }
   if (copies.length && !withWorker.length) {
     alerts.push(['warn', 'Salinan diset, Worker belum ada', '#copies', 'Lihat salinan',
