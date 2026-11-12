@@ -24,7 +24,7 @@ warna hanya dipakai untuk menandai status dan hierarki, bukan untuk hiasan.
 | Latar | `#0a0a0f` | Gelap pekat supaya panel terbaca nyaman malam hari saat kerja panjang, sekaligus menyatu dengan UI inbox yang sudah ada |
 | Permukaan | `#12121a`, `#171722` | Dua tingkat saja untuk memisahkan kartu dari latarnya dan baris aktif dari baris biasa |
 | Garis | `#1e1e2e` | Pemisah tipis, tidak menarik perhatian |
-| Teks | `#e2e8f0`, `#64748b` | Teks utama kontras tinggi, teks sekunder cukup untuk label |
+| Teks | `#e2e8f0`, `#94a3b8` | Teks utama kontras tinggi; teks sekunder dinaikkan ke `#94a3b8` supaya lolos WCAG AA (7.3:1 di permukaan, 7.7:1 di latar) |
 | Aksen | `#8b5cf6` (tekan: `#7c3aed`) | Identitas produk yang sudah dipakai UI inbox; dipakai hemat: focus ring, tombol utama, penanda nav aktif |
 | Status | `#22c55e`, `#ef4444`, `#3b82f6` | Hanya untuk keadaan nyata (aktif/off, error, tautan), tidak untuk dekorasi |
 
