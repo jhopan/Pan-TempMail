@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="id">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -9,7 +9,7 @@
     :root{
       --bg:#0a0a0f;--surface:#12121a;--border:#1e1e2e;--text:#e2e8f0;
       --muted:#64748b;--brand:#8b5cf6;--brand-d:#7c3aed;
-      --green:#22c55e;--red:#ef4444;--blue:#3b82f6;--radius:10px;
+      --green:#22c55e;--yellow:#eab308;--red:#ef4444;--blue:#3b82f6;--radius:10px;
     }
     body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
       background:var(--bg);color:var(--text);height:100vh;display:flex;flex-direction:column;overflow:hidden}
@@ -31,7 +31,11 @@
     .logo small{font-size:10px;color:var(--muted);font-weight:400}
     .sse{display:flex;align-items:center;gap:6px;margin-top:4px}
     .dot{width:7px;height:7px;border-radius:50%;background:var(--muted)}
-    .dot.live{background:var(--green)}.dot.conn{background:var(--muted)}
+    .dot-live{background:var(--green)}
+    .dot-connecting{background:var(--muted)}
+    .dot-reconnecting{background:var(--yellow);animation:dotPulse 1.4s ease-in-out infinite}
+    @keyframes dotPulse{0%,100%{opacity:1}50%{opacity:.35}}
+    @media (prefers-reduced-motion:reduce){.dot-reconnecting{animation:none}}
     .sse-t{font-size:11px;color:var(--muted)}
     .sb-form{padding:12px 16px;border-bottom:1px solid var(--border);display:flex;flex-direction:column;gap:8px}
     input,select{background:var(--surface);border:1px solid var(--border);color:var(--text);
@@ -83,9 +87,9 @@
 </head>
 <body>
   <div class="topbar">
-    <div class="topbar-l">⚡ Logged in as <b id="userEmail">unknown</b></div>
+    <div class="topbar-l">⚡ Masuk sebagai <b id="userEmail">tidak diketahui</b></div>
     <div class="topbar-r">
-      <button class="btn-sm" onclick="API.logout()">Logout</button>
+      <button class="btn-sm" onclick="API.logout()">Keluar</button>
     </div>
   </div>
   <div class="layout">
@@ -93,34 +97,34 @@
       <div class="sb-head">
         <div class="logo"><span>⚡</span> TempMail <small>By JhopanStore</small></div>
         <div class="sse">
-          <span id="sseDot" class="dot conn"></span>
-          <span id="sseText" class="sse-t">Connecting...</span>
+          <span id="sseDot" class="dot dot-connecting"></span>
+          <span id="sseText" class="sse-t">Menghubungkan...</span>
         </div>
       </div>
       <div class="sb-form">
-        <input id="username" type="text" placeholder="Enter username" class="cd-btn"
+        <input id="username" type="text" placeholder="Masukkan nama pengguna" class="cd-btn"
           onkeydown="if(event.key==='Enter'){changeEmail()}" />
         <select id="domain" class="cd-btn"></select>
         <div class="btns">
-          <button id="changeBtn" class="btn btn-p cd-btn" onclick="changeEmail()">Change</button>
-          <button id="randomBtn" class="btn btn-s cd-btn" onclick="randomEmail()">🎲 Random</button>
+          <button id="changeBtn" class="btn btn-p cd-btn" onclick="changeEmail()">Ganti</button>
+          <button id="randomBtn" class="btn btn-s cd-btn" onclick="randomEmail()">🎲 Acak</button>
         </div>
         <div class="email-box">
-          <div class="lbl">Your Email</div>
-          <div id="currentEmail" class="val" onclick="copyEmail()">loading...</div>
-          <div id="copyBtn" class="cp" onclick="copyEmail()">📋 Copy</div>
+          <div class="lbl">Email Anda</div>
+          <div id="currentEmail" class="val" onclick="copyEmail()">memuat...</div>
+          <div id="copyBtn" class="cp" onclick="copyEmail()">📋 Salin</div>
         </div>
       </div>
       <div id="messageList" class="msg-list"></div>
-      <div class="sb-foot"><span id="msgCount">0</span> messages</div>
+      <div class="sb-foot"><span id="msgCount">0 pesan</span></div>
     </div>
     <div id="messageView" class="main"></div>
   </div>
   <div class="footer-credit"><b>TempMail By JhopanStore</b> — Credit JhopanStore</div>
-  <script src="/app/app.js?v=8"></script>
+  <script src="/app/app.js?v=9"></script>
   <script>
     const user = JSON.parse(localStorage.getItem('auth_user') || '{}');
-    document.getElementById('userEmail').textContent = user.email || 'unknown';
+    document.getElementById('userEmail').textContent = user.email || 'tidak diketahui';
     async function loadDomains() {
       try {
         const res = await fetch('/api/config');

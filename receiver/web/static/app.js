@@ -135,44 +135,57 @@ async function randomEmail() {
 function copyEmail() {
   navigator.clipboard.writeText(currentEmail);
   const btn = document.getElementById('copyBtn');
-  btn.textContent = '✓ Copied!';
-  setTimeout(() => btn.textContent = '📋 Copy', 2000);
+  btn.textContent = '✓ Tersalin';
+  setTimeout(() => btn.textContent = '📋 Salin', 2000);
 }
 
 function startCooldown(seconds) {
   cooldown = seconds;
+  const buttons = () => [document.getElementById('changeBtn'), document.getElementById('randomBtn')].filter(Boolean);
   const update = () => {
     if (cooldown <= 0) {
-      document.querySelectorAll('.cooldown-btn').forEach(b => {
-        b.disabled = false;
-        b.classList.remove('opacity-50', 'cursor-not-allowed');
-      });
-      document.getElementById('cooldownNotice')?.remove();
+      buttons().forEach(b => { b.disabled = false; });
+      document.getElementById('changeBtn').textContent = 'Ganti';
+      document.getElementById('randomBtn').textContent = '🎲 Acak';
       return;
     }
-    document.querySelectorAll('.cooldown-btn').forEach(b => {
-      b.disabled = true;
-      b.classList.add('opacity-50', 'cursor-not-allowed');
-      if (b.id === 'changeBtn') b.textContent = 'Wait ' + cooldown + 's';
-      if (b.id === 'randomBtn') b.textContent = '🎲 ' + cooldown + 's';
-    });
+    buttons().forEach(b => { b.disabled = true; });
+    document.getElementById('changeBtn').textContent = 'Tunggu ' + cooldown + 's';
+    document.getElementById('randomBtn').textContent = '🎲 ' + cooldown + 's';
     cooldown--;
     setTimeout(update, 1000);
   };
   update();
 }
 
+function setMsgCount(text) {
+  const el = document.getElementById('msgCount');
+  if (el) el.textContent = text;
+}
+
 async function loadInbox() {
-  const res = await API.request('/api/inbox/' + encodeURIComponent(currentEmail));
-  if (!res || !res.ok) return;
-  const data = await res.json();
+  let data;
+  try {
+    const res = await API.request('/api/inbox/' + encodeURIComponent(currentEmail));
+    if (!res || !res.ok) {
+      setMsgCount('tidak terbaca');
+      return;
+    }
+    data = await res.json();
+  } catch {
+    setMsgCount('tidak terbaca');
+    return;
+  }
   messages = data.data || data || [];
+  const total = typeof data.total === 'number' ? data.total : messages.length;
+  setMsgCount(total + ' pesan');
   renderMessageList();
 }
 
 function connectSSE() {
   if (sse) sse.close();
   if (!API.token) return;
+  updateSSEStatus('connecting');
   sse = new EventSource('/sse/' + encodeURIComponent(currentEmail) + '?token=' + encodeURIComponent(API.token));
   sse.addEventListener('connected', () => updateSSEStatus('live'));
   sse.addEventListener('new_email', () => { loadInbox(); });
@@ -184,13 +197,16 @@ function reconnectSSE() {
   connectSSE();
 }
 
+const SSE_DOT_CLASS = { live: 'dot-live', connecting: 'dot-connecting', reconnecting: 'dot-reconnecting' };
+const SSE_DOT_TEXT = { live: 'Terhubung', connecting: 'Menghubungkan...', reconnecting: 'Menyambung ulang...' };
+
 function updateSSEStatus(status) {
   const dot = document.getElementById('sseDot');
   const text = document.getElementById('sseText');
   if (!dot || !text) return;
-  const colors = { live: 'bg-green-500', reconnecting: 'bg-yellow-500 animate-pulse', connecting: 'bg-gray-600' };
-  dot.className = 'inline-block w-2 h-2 rounded-full ' + (colors[status] || colors.connecting);
-  text.textContent = status === 'live' ? 'Live' : 'Connecting...';
+  dot.classList.remove('dot-live', 'dot-connecting', 'dot-reconnecting');
+  dot.classList.add(SSE_DOT_CLASS[status] || SSE_DOT_CLASS.connecting);
+  text.textContent = SSE_DOT_TEXT[status] || SSE_DOT_TEXT.connecting;
 }
 
 async function openMessage(id) {
@@ -209,7 +225,7 @@ async function openMessage(id) {
 }
 
 async function deleteMessage(id) {
-  if (!confirm('Delete this message?')) return;
+  if (!confirm('Hapus pesan ini?')) return;
   await API.request('/api/message/' + id, { method: 'DELETE' });
   selectedMsg = null;
   renderMessage();
@@ -217,10 +233,11 @@ async function deleteMessage(id) {
 }
 
 async function deleteInbox() {
-  if (!confirm('Delete all messages for ' + currentEmail + '?')) return;
+  if (!confirm('Hapus semua pesan untuk ' + currentEmail + '?')) return;
   await API.request('/api/inbox/' + encodeURIComponent(currentEmail), { method: 'DELETE' });
   selectedMsg = null;
   messages = [];
+  setMsgCount('0 pesan');
   renderMessage();
   renderMessageList();
 }
@@ -229,14 +246,14 @@ function renderMessageList() {
   const container = document.getElementById('messageList');
   if (!container) return;
   if (messages.length === 0) {
-    container.innerHTML = '<div class="empty"><div class="ico">📭</div><div class="txt">No messages</div><div class="sub">Send an email to ' + currentEmail + '</div></div>';
+    container.innerHTML = '<div class="empty"><div class="ico">📭</div><div class="txt">Belum ada pesan</div><div class="sub">Kirim email ke ' + currentEmail + ' untuk melihatnya di sini</div></div>';
     return;
   }
   container.innerHTML = messages.map(m => `
     <div onclick="openMessage(${m.id})" class="msg-item">
       <span class="time">${formatTime(m.received_at)}</span>
       <div class="from">${escapeHtml(m.sender)}</div>
-      <div class="subj">${escapeHtml(m.subject || '(no subject)')}</div>
+      <div class="subj">${escapeHtml(m.subject || '(tanpa subjek)')}</div>
     </div>
   `).join('');
 }
@@ -245,7 +262,7 @@ function renderMessage(msg, attachments = []) {
   const container = document.getElementById('messageView');
   if (!container) return;
   if (!msg) {
-    container.innerHTML = '<div class="placeholder"><div><div class="ico">📧</div><div class="txt">Select an email to read</div></div></div>';
+    container.innerHTML = '<div class="placeholder"><div><div class="ico">📧</div><div class="txt">Pilih pesan untuk dibaca</div></div></div>';
     return;
   }
   let html = msg.html_body || '';
@@ -256,7 +273,7 @@ function renderMessage(msg, attachments = []) {
 
   const attHtml = attachments.length > 0 ? `
     <div class="att-area">
-      <div class="lbl">${attachments.length} attachment(s)</div>
+      <div class="lbl">${attachments.length} lampiran</div>
       <div class="att-list">
         ${attachments.map(a => `<a href="/api/attachment/${a.id}" download class="att-item"><span>📎</span>${escapeHtml(a.filename)} (${formatSize(a.size)})</a>`).join('')}
       </div>
@@ -268,9 +285,9 @@ function renderMessage(msg, attachments = []) {
 
   container.innerHTML = `
     <div class="msg-head">
-      <button onclick="deleteMessage(${msg.id})" class="del-btn">🗑️ Delete</button>
-      <h2>${escapeHtml(msg.subject || '(no subject)')}</h2>
-      <div class="from">From: ${escapeHtml(msg.sender)}</div>
+      <button onclick="deleteMessage(${msg.id})" class="del-btn">🗑️ Hapus</button>
+      <h2>${escapeHtml(msg.subject || '(tanpa subjek)')}</h2>
+      <div class="from">Dari: ${escapeHtml(msg.sender)}</div>
     </div>
     ${attHtml}
     <div class="msg-body">${bodyHtml}</div>
