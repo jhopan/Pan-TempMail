@@ -78,6 +78,20 @@ func GetAttachmentByID(db *sql.DB, id int) (*Attachment, []byte, error) {
 	return &a, data, nil
 }
 
+// GetAttachmentInboxEmail returns the address of the inbox that holds an attachment.
+func GetAttachmentInboxEmail(db *sql.DB, attachmentID int) (string, error) {
+	var email string
+	query := placeholder(`SELECT i.email FROM attachments a
+		JOIN messages m ON a.message_id = m.id
+		JOIN inboxes i ON m.inbox_id = i.id
+		WHERE a.id = $1`)
+	err := db.QueryRowContext(context.Background(), query, attachmentID).Scan(&email)
+	if err == sql.ErrNoRows {
+		return "", fmt.Errorf("attachment not found")
+	}
+	return email, err
+}
+
 // DeleteAttachment deletes an attachment by message ID.
 func DeleteAttachment(db *sql.DB, messageID int) error {
 	query := `DELETE FROM attachments WHERE message_id = $1`

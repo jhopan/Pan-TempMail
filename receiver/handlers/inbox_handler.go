@@ -17,6 +17,9 @@ import (
 // GET /inbox/:email?page=1&per_page=20
 func GetInbox(c *gin.Context) {
 	email := c.Param("email")
+	if !AuthorizeInbox(c, email) {
+		return
+	}
 
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	perPage, _ := strconv.Atoi(c.DefaultQuery("per_page", "20"))
@@ -82,8 +85,12 @@ func CreateInboxAPI(c *gin.Context) {
 	// Check if inbox already exists
 	inboxID, err := repository.GetInboxID(database.Conn(), req.Email)
 	if err != nil {
-		// Create new inbox
-		inboxID, err = repository.CreateInbox(database.Conn(), req.Email)
+		// Create new inbox, owned by the logged-in user when the request carries a JWT
+		if ownerID := callerUserID(c); ownerID > 0 {
+			inboxID, err = repository.CreateInboxOwned(database.Conn(), req.Email, ownerID)
+		} else {
+			inboxID, err = repository.CreateInbox(database.Conn(), req.Email)
+		}
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create inbox"})
 			return
@@ -107,6 +114,9 @@ func CreateInboxAPI(c *gin.Context) {
 // This is the automation-friendly endpoint: no polling needed.
 func WaitForMessage(c *gin.Context) {
 	email := c.Param("email")
+	if !AuthorizeInbox(c, email) {
+		return
+	}
 
 	// Parse query params
 	timeoutStr := c.DefaultQuery("timeout", "60")
@@ -156,6 +166,14 @@ func GetMessage(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Message not found"})
 		return
 	}
+	inboxEmail, err := repository.GetMessageInboxEmail(database.Conn(), id)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Message not found"})
+		return
+	}
+	if !AuthorizeInbox(c, inboxEmail) {
+		return
+	}
 	c.JSON(http.StatusOK, gin.H{
 		"id":        msg.ID,
 		"sender":    msg.Sender,
@@ -176,6 +194,12 @@ func DeleteMessage(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid message ID"})
 		return
 	}
+	// Unknown message: nothing to own, keep the existing success response
+	if inboxEmail, err := repository.GetMessageInboxEmail(database.Conn(), idStr); err == nil {
+		if !AuthorizeInbox(c, inboxEmail) {
+			return
+		}
+	}
 	if err := repository.DeleteMessage(database.Conn(), id); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete message"})
 		return
@@ -187,6 +211,9 @@ func DeleteMessage(c *gin.Context) {
 // DELETE /inbox/:email
 func DeleteInbox(c *gin.Context) {
 	email := c.Param("email")
+	if !AuthorizeInbox(c, email) {
+		return
+	}
 	if err := repository.DeleteInbox(database.Conn(), email); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete inbox"})
 		return
@@ -202,6 +229,12 @@ func GetMessageAttachments(c *gin.Context) {
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid message ID"})
 		return
+	}
+	// Unknown message: no owner to check, keep returning the empty list
+	if inboxEmail, err := repository.GetMessageInboxEmail(database.Conn(), idStr); err == nil {
+		if !AuthorizeInbox(c, inboxEmail) {
+			return
+		}
 	}
 	attachments, err := repository.GetAttachmentsByMessageID(database.Conn(), id)
 	if err != nil {
@@ -219,6 +252,12 @@ func GetAttachment(c *gin.Context) {
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid attachment ID"})
 		return
+	}
+	// Unknown attachment: fall through to the unchanged 404 below
+	if inboxEmail, err := repository.GetAttachmentInboxEmail(database.Conn(), id); err == nil {
+		if !AuthorizeInbox(c, inboxEmail) {
+			return
+		}
 	}
 	att, data, err := repository.GetAttachmentByID(database.Conn(), id)
 	if err != nil {

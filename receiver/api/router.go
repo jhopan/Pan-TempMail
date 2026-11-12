@@ -27,6 +27,10 @@ func GetBroker() *events.Broker { return events.Get() }
 
 func SSEHandler(c *gin.Context) {
 	email := c.Param("email")
+	// Logged-in viewers only stream their own inboxes; API-key viewers stay unrestricted
+	if !handlers.AuthorizeInbox(c, email) {
+		return
+	}
 	c.Writer.Header().Set("Content-Type", "text/event-stream")
 	c.Writer.Header().Set("Cache-Control", "no-cache")
 	c.Writer.Header().Set("Connection", "keep-alive")
@@ -165,7 +169,7 @@ func SetupRouter() *gin.Engine {
 	// Rate limiters
 	apiRate, _ := limiter.NewRateFromFormatted("60-M")
 	delRate, _ := limiter.NewRateFromFormatted("20-M")
-	loginRate, _ := limiter.NewRateFromFormatted("5-M")
+	loginRate, _ := limiter.NewRateFromFormatted("10-M")
 	adminRate, _ := limiter.NewRateFromFormatted("30-M")
 
 	apiStore := memory.NewStore()
