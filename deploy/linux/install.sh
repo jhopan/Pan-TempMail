@@ -195,42 +195,57 @@ ask_port() {
 
 # --- unduhan ------------------------------------------------------------------
 
+# Unduhan dengan batas waktu pendek: koneksi yang macet harus gagal cepat, bukan
+# menggantung berjam-jam. github.com pada beberapa jaringan (termasuk ISP rumahan) bisa
+# menolak koneksi sementara, jadi percobaan diulang beberapa kali.
+CURL_NET=(--connect-timeout 15 --max-time 240 --retry 2 --retry-delay 2 --retry-connrefused)
+
 fetch() {
   local url=$1 out=$2
   if command -v curl >/dev/null 2>&1; then
-    curl -fsSL --retry 3 --max-time 300 "$url" -o "$out"
+    curl -fsSL "${CURL_NET[@]}" "$url" -o "$out"
   elif command -v wget >/dev/null 2>&1; then
-    wget -qO "$out" "$url"
+    wget -q --timeout=20 --tries=3 -O "$out" "$url"
   else
     die "butuh curl atau wget untuk mengunduh biner"
   fi
 }
 
-# fetch_asset mengunduh satu aset rilis. Repo publik memakai URL rilis langsung; kalau token
-# tersedia (repo privat), lewat API aset dengan header Authorization.
-fetch_asset() {
-  local name=$1 out=$2 asset_id
-  if [ -z "$TOKEN" ]; then
-    fetch "${DOWNLOAD_BASE}/${name}" "$out"
-    return
-  fi
+# fetch_via_api mengambil satu aset lewat API GitHub. Dipakai sebagai jalur cadangan
+# (dan wajib untuk repo privat); api.github.com sering tetap terjangkau saat
+# github.com menolak koneksi.
+fetch_via_api() {
+  local name=$1 out=$2 asset_id api
   [ -n "${PYTHON:-}" ] || PYTHON=$(command -v python3 || true)
-  [ -n "$PYTHON" ] || die "butuh python3 untuk mengunduh aset repo privat"
-  local api
+  [ -n "$PYTHON" ] || return 1
   if [ "$VERSION" = "latest" ]; then
     api="https://api.github.com/repos/${REPO}/releases/latest"
   else
     api="https://api.github.com/repos/${REPO}/releases/tags/${VERSION}"
   fi
-  asset_id=$(curl -fsSL -H "Authorization: Bearer ${TOKEN}" -H "Accept: application/vnd.github+json" "$api" \
-    | "$PYTHON" -c 'import json,sys; name=sys.argv[1]; data=json.load(sys.stdin); print(next((a["id"] for a in data.get("assets", []) if a["name"] == name), ""))' "$name")
-  [ -n "$asset_id" ] || die "aset ${name} tidak ada di rilis ${VERSION} (${REPO})"
-  if command -v curl >/dev/null 2>&1; then
-    curl -fsSL --retry 3 --max-time 300 -H "Authorization: Bearer ${TOKEN}" -H "Accept: application/octet-stream" \
-      "https://api.github.com/repos/${REPO}/releases/assets/${asset_id}" -o "$out"
-  else
-    die "butuh curl untuk mengunduh aset repo privat"
+  local auth=()
+  [ -n "$TOKEN" ] && auth=(-H "Authorization: Bearer ${TOKEN}")
+  asset_id=$(curl -fsSL --connect-timeout 15 --max-time 60 "${auth[@]}" -H "Accept: application/vnd.github+json" "$api" \
+    | "$PYTHON" -c 'import json,sys; name=sys.argv[1]; data=json.load(sys.stdin); print(next((a["id"] for a in data.get("assets", []) if a["name"] == name), ""))' "$name" 2>/dev/null || true)
+  [ -n "$asset_id" ] || return 1
+  curl -fsSL --connect-timeout 15 --max-time 240 --retry 2 --retry-delay 2 \
+    "${auth[@]}" -H "Accept: application/octet-stream" \
+    "https://api.github.com/repos/${REPO}/releases/assets/${asset_id}" -o "$out"
+}
+
+# fetch_asset mengunduh satu aset rilis. Repo publik memakai URL rilis langsung; kalau token
+# tersedia (repo privat), lewat API aset dengan header Authorization.
+fetch_asset() {
+  local name=$1 out=$2
+  if [ -n "$TOKEN" ]; then
+    fetch_via_api "$name" "$out" || die "gagal mengunduh ${name} lewat API (repo privat: cek token di /etc/tempmail/github-token)"
+    return
   fi
+  if fetch "${DOWNLOAD_BASE}/${name}" "$out"; then
+    return
+  fi
+  log "  koneksi ke github.com gagal, mencoba lewat api.github.com ..."
+  fetch_via_api "$name" "$out" || die "gagal mengunduh ${name} dari rilis ${VERSION} (${REPO}); coba lagi atau pakai --from-file"
 }
 
 sha256_of() {
@@ -428,7 +443,15 @@ fi
 install -o root -g root -m 0755 "${TMP_DIR}/${ASSET}" "$ROOT/tempmail"
 
 if [ -n "$SOURCE_DIR" ]; then
-  install -o root -g root -m 0755 "$SOURCE_DIR/install.sh" "$ROOT/install.sh"
+  # Saat update, installer yang sedang berjalan TIDAK ditimpa: salinan dari rilis hanya
+  # disimpan sebagai .release, supaya perbaikan pada installer yang aktif tidak dibatalkan
+  # oleh tarball yang lebih lama.
+  if [ "$UPDATE" = "1" ] && [ -f "$ROOT/install.sh" ]; then
+    install -o root -g root -m 0644 "$SOURCE_DIR/install.sh" "$ROOT/install.sh.release"
+    log "installer tetap dipakai: ${ROOT}/install.sh (salinan rilis: ${ROOT}/install.sh.release)"
+  else
+    install -o root -g root -m 0755 "$SOURCE_DIR/install.sh" "$ROOT/install.sh"
+  fi
   install -o root -g root -m 0755 "$SOURCE_DIR/tempmailctl" /usr/local/sbin/tempmailctl
   install -o root -g root -m 0755 "$SOURCE_DIR/menutempmail" /usr/local/bin/menutempmail
   install -o root -g root -m 0755 "$SOURCE_DIR/setup.sh" "$ROOT/setup.sh"
