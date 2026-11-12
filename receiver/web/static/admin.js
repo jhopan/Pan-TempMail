@@ -16,6 +16,9 @@ const state = {
   system: null,
   systemHelper: null,
   domainCheck: null,
+  server: {
+    logLines: 100,
+  },
   setup: {
     helper: null,
     profile: null,
@@ -97,7 +100,8 @@ const ui = {
   dbAlerts: document.getElementById('dbAlerts'),
   dbAlertsWrap: document.getElementById('dbAlertsWrap'),
   svServiceBtn: document.getElementById('svServiceBtn'),
-  svLogLines: document.getElementById('svLogLines'),
+  svLogChips: document.getElementById('svLogChips'),
+  svUnits: document.getElementById('svUnits'),
   svLogBtn: document.getElementById('svLogBtn'),
   svBackupBtn: document.getElementById('svBackupBtn'),
   svRestartBtn: document.getElementById('svRestartBtn'),
@@ -139,6 +143,8 @@ const ui = {
   dgFetched: document.getElementById('dgFetched'),
   dgState: document.getElementById('dgState'),
   dgWrap: document.getElementById('dgWrap'),
+  dgTiles: document.getElementById('dgTiles'),
+  dgDots: document.getElementById('dgDots'),
   dgHelper: document.getElementById('dgHelper'),
   dgApp: document.getElementById('dgApp'),
   dgDb: document.getElementById('dgDb'),
@@ -154,6 +160,7 @@ const ui = {
   domainCheckMsg: document.getElementById('domainCheckMsg'),
   tnCnameBtn: document.getElementById('tnCnameBtn'),
   stCheckAllBtn: document.getElementById('stCheckAllBtn'),
+  stRail: document.getElementById('stRail'),
   setupSteps: document.getElementById('setupSteps'),
   setupMsg: document.getElementById('setupMsg'),
 };
@@ -657,8 +664,9 @@ function showFixOutcome(domain, outcome, msgEl) {
 }
 
 function aspectBadge(label, ok, detail) {
-  const span = node('span', 'badge' + (ok ? ' on' : ' off'), label + ': ' + (ok ? 'ok' : 'perlu'));
-  if (detail) span.title = detail;
+  const span = node('span', 'aspect ' + (ok ? 'ok' : 'bad'));
+  span.append(node('i'), node('span', null, label));
+  span.title = label + ': ' + (detail || (ok ? 'siap' : 'perlu'));
   return span;
 }
 
@@ -816,6 +824,21 @@ function setupLink(label, hash) {
   const link = node('a', 'btn btn-p small', label);
   link.href = hash;
   return link;
+}
+
+// Rel lima langkah di atas daftar: titik berwarna per langkah + hitungan selesai.
+function renderStepRail(entries) {
+  const nodes = [];
+  entries.forEach(function (entry, index) {
+    if (index) nodes.push(node('span', 'rail-line'));
+    const box = node('div', 'rail-node ' + (entry[1] || 'warn'));
+    box.append(node('i'), node('span', null, entry[0]));
+    box.title = entry[0] + ': ' + (entry[1] === 'ok' ? 'selesai' : (entry[1] === 'bad' ? 'belum' : 'perlu dicek'));
+    nodes.push(box);
+  });
+  const done = entries.filter(function (entry) { return entry[1] === 'ok'; }).length;
+  nodes.push(node('span', 'rail-count', done + '/' + entries.length + ' selesai'));
+  ui.stRail.replaceChildren(...nodes);
 }
 
 function setupStepNode(number, title, level, detail, actions, body) {
@@ -1004,6 +1027,13 @@ function renderSetup() {
   }
   steps.push(setupStepNode(5, 'Uji terima email', inboxLevel, inboxDetail, inboxActions, inboxBody));
 
+  renderStepRail([
+    ['1 Helper', helperInfo.level],
+    ['2 Profil', profileInfo.level],
+    ['3 Tunnel', tunnelInfo.level],
+    ['4 Domain', domainInfo.level],
+    ['5 Inbox', inboxLevel],
+  ]);
   ui.setupSteps.replaceChildren();
   steps.forEach(function (step) { ui.setupSteps.append(step); });
 }
@@ -1594,6 +1624,44 @@ async function waitForHealth(timeoutMs, intervalMs) {
   return false;
 }
 
+// renderServiceUnits menggambar satu titik per unit dari keluaran helper ("unit: state").
+function renderServiceUnits(body) {
+  const output = body && body.output ? String(body.output) : '';
+  const rows = output.split('\n')
+    .map(function (line) { return line.trim(); })
+    .filter(Boolean)
+    .map(function (line) {
+      const at = line.lastIndexOf(':');
+      return at === -1 ? null : [line.slice(0, at), line.slice(at + 1).trim()];
+    })
+    .filter(function (row) { return row && row[0] && row[1]; });
+  if (!rows.length) {
+    ui.svUnits.replaceChildren(dotCell('Unit', 'tidak terbaca', 'warn'));
+    return;
+  }
+  ui.svUnits.replaceChildren(...rows.map(function (row) {
+    const running = ['active', 'running'].indexOf(row[1].toLowerCase()) !== -1;
+    return dotCell(shortUnit(row[0]), row[1], running ? 'ok' : 'bad');
+  }));
+}
+
+// shortUnit memendekkan nama unit systemd agar muat di kotak kecil.
+function shortUnit(unit) {
+  return unit.replace(/\.service$/, '').replace(/\.timer$/, ' timer');
+}
+
+// loadServerPanel mengisi status unit saat panel Server pertama dibuka. Aksi ini read-only,
+// jadi tidak menyentuh keluaran log yang sedang dibaca operator.
+async function loadServerPanel() {
+  ui.svUnits.replaceChildren(dotCell('Unit', 'memuat', 'warn'));
+  try {
+    renderServiceUnits(await apiPost('/action', { action: 'service-status' }));
+  } catch (err) {
+    const info = apiFailure(err);
+    ui.svUnits.replaceChildren(dotCell('Helper', info.message.slice(0, 34), 'warn'));
+  }
+}
+
 function bindServer() {
   ui.svReloadBtn.addEventListener('click', function () {
     run(ui.svReloadBtn, ui.svMsg, loadSystemStatus);
@@ -1602,12 +1670,22 @@ function bindServer() {
   ui.svServiceBtn.addEventListener('click', function () {
     runAction(ui.svServiceBtn, async function () {
       const body = renderActionOutput(await apiPost('/action', { action: 'service-status' }));
+      renderServiceUnits(body);
       announceAction(body, 'Status service tempmail, cloudflared, dan timer backup diambil');
     });
   });
 
+  ui.svLogChips.addEventListener('click', function (event) {
+    const chip = event.target.closest('.chip');
+    if (!chip) return;
+    state.server.logLines = parseInt(chip.dataset.lines, 10) || 100;
+    [...ui.svLogChips.querySelectorAll('.chip')].forEach(function (item) {
+      item.setAttribute('aria-pressed', String(item === chip));
+    });
+  });
+
   ui.svLogBtn.addEventListener('click', function () {
-    const lines = parseInt(ui.svLogLines.value, 10) || 100;
+    const lines = state.server.logLines;
     runAction(ui.svLogBtn, async function () {
       const body = renderActionOutput(await apiPost('/action', { action: 'logs', lines: lines }));
       announceAction(body, 'Log service tempmail ' + lines + ' baris terakhir diambil');
@@ -1980,6 +2058,44 @@ async function loadDiagnostics() {
   const db = (sys && sys.db) || {};
   const sysCf = (sys && sys.cloudflare) || {};
   s.ok();
+  const copies = (cloud && Array.isArray(cloud.copies)) ? cloud.copies : [];
+  const domains = (cloud && Array.isArray(cloud.domains)) ? cloud.domains : [];
+  const diagTunnel = (cloud && cloud.tunnel) ? cloud.tunnel : null;
+  const tunnelOK = !!diagTunnel && ['healthy', 'up', 'connected', 'active']
+    .indexOf(String(diagTunnel.status || '').toLowerCase()) !== -1;
+  const ramPct = sys ? (Number(app.rss_bytes) || 0) / 1048576 : 0;
+
+  ui.dgTiles.replaceChildren(
+    statTile('Uptime', sys ? formatUptime(app.uptime_seconds) : '-',
+      'RAM ' + (sys ? formatMb(app.rss_bytes) : '-'),
+      sys ? { pct: ramPct, tone: ramPct >= 90 ? 'bad' : (ramPct >= 70 ? 'warn' : 'ok') } : null),
+    statTile('Inbox', sys ? String(countOf(db.inboxes)) : '-',
+      sys ? 'pesan ' + countOf(db.messages) + ' · lampiran ' + countOf(db.attachments) : 'status sistem tidak terbaca'),
+    statTile('Database', sys ? formatBytes(db.bytes) : '-',
+      'profil ' + countOf(sysCf.profiles) + ' · domain ' + countOf(sysCf.domains)),
+  );
+
+  ui.dgDots.replaceChildren(
+    dotCell('Helper', sys ? (helper.installed ? 'siap' : 'belum') : '?', sys ? (helper.installed ? 'ok' : 'bad') : 'warn'),
+    dotCell('Aplikasi', app.go_version || '?', sys ? 'ok' : 'warn'),
+    dotCell('Database', sys ? formatBytes(db.bytes) : '?', sys ? 'ok' : 'warn'),
+    dotCell('Cloudflare', countOf(sysCf.profiles) + ' profil', sys ? 'ok' : 'warn'),
+    dotCell('Tunnel', tunnelOK ? 'siap' : String((diagTunnel && diagTunnel.status) || 'unknown'), tunnelOK ? 'ok' : 'warn'),
+    dotCell('Salinan', copies.length ? copies.length + ' alamat' : 'off', 'ok'),
+  );
+
+  ui.dgCfDomains.replaceChildren();
+  if (domains.length === 0) {
+    ui.dgCfDomains.append(dotCell('Domain', cloud ? 'belum ada' : 'butuh status Cloudflare', 'warn'));
+  } else {
+    domains.forEach(function (d) {
+      ui.dgCfDomains.append(dotCell(d.domain,
+        (d.routing ? 'routing ON' : 'routing OFF') + ' · ' + (d.profile || 'profil aktif'),
+        d.routing ? 'ok' : 'warn'));
+    });
+  }
+
+  // Fakta mentah tetap lengkap, disimpan terlipat supaya layar tidak penuh tulisan.
   fillKv(ui.dgHelper, [
     ['Terpasang', sys ? (helper.installed ? 'terpasang' : 'belum terpasang') : 'tidak diketahui'],
     ['Direktori', helper.dir || '-'],
@@ -1999,7 +2115,6 @@ async function loadDiagnostics() {
     ['Pesan', sys ? String(countOf(db.messages)) : '-'],
     ['Lampiran', sys ? String(countOf(db.attachments)) : '-'],
   ]);
-  const copies = (cloud && Array.isArray(cloud.copies)) ? cloud.copies : [];
   fillKv(ui.dgCf, [
     ['Profil', String(countOf(sysCf.profiles))],
     ['Domain', String(countOf(sysCf.domains))],
@@ -2009,21 +2124,7 @@ async function loadDiagnostics() {
     ['api_base', (cloud && cloud.api_base) || '-'],
     ['Tujuan salinan', cloud ? String(copies.length) + ' alamat' : '-'],
   ]);
-  fillKv(ui.dgTunnel, diagnosticsTunnelRows(cloud && cloud.tunnel));
-  ui.dgCfDomains.replaceChildren();
-  const domains = (cloud && Array.isArray(cloud.domains)) ? cloud.domains : [];
-  if (domains.length === 0) {
-    ui.dgCfDomains.append(node('li', null, cloud ? 'Belum ada domain terdaftar di database.' : 'Daftar domain butuh status Cloudflare yang berhasil dimuat.'));
-  } else {
-    domains.forEach(function (d) {
-      const li = node('li');
-      li.append(node('span', 'mono', d.domain));
-      li.append(badge(d.routing ? 'routing ON' : 'routing OFF', !!d.routing));
-      li.append(node('span', null, d.profile ? 'profil ' + d.profile : 'profil aktif'));
-      li.append(node('span', null, d.enabled ? 'aktif' : 'nonaktif'));
-      ui.dgCfDomains.append(li);
-    });
-  }
+  fillKv(ui.dgTunnel, diagnosticsTunnelRows(diagTunnel));
   const failed = [];
   if (!sys) failed.push('status sistem');
   if (!cloud) failed.push('status Cloudflare');
@@ -2321,7 +2422,7 @@ const panelLoaders = {
   users: loadUsers,
   naming: loadNaming,
   diagnostics: loadDiagnostics,
-  server: null,
+  server: loadServerPanel,
   dashboard: null,
   import: null,
 };

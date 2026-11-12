@@ -188,6 +188,32 @@
     .bar span{display:block;height:100%;background:var(--green)}
     .bar.warn span{background:var(--yellow)}
     .bar.bad span{background:var(--red)}
+    .actions-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(148px,1fr));gap:10px}
+    .action-tile{display:flex;flex-direction:column;align-items:flex-start;gap:3px;text-align:left;
+      background:var(--surface-2);border:1px solid var(--border);border-radius:9px;padding:11px 12px;
+      color:var(--text);cursor:pointer;font:inherit;min-height:66px;transition:border-color .15s}
+    .action-tile:hover{border-color:var(--brand)}
+    .action-tile i{font-style:normal;font-size:17px;line-height:1;color:var(--brand)}
+    .action-tile b{font-size:13px;font-weight:600}
+    .action-tile small{font-size:11px;color:var(--muted)}
+    .action-tile.danger i{color:var(--red)}
+    .action-tile[disabled]{opacity:.55;cursor:progress}
+    .chips{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin:4px 0 0}
+    .chip{background:var(--surface-2);border:1px solid var(--border);border-radius:999px;padding:5px 12px;
+      font-size:12px;color:var(--muted);cursor:pointer;font:inherit;font-size:12px}
+    .chip[aria-pressed="true"]{color:var(--text);border-color:var(--brand);background:rgba(139,92,246,.14)}
+    .step-rail{display:flex;align-items:flex-start;gap:0;margin:2px 0 16px;flex-wrap:wrap}
+    .step-rail .rail-node{display:flex;flex-direction:column;align-items:center;gap:5px;min-width:62px}
+    .step-rail .rail-node i{width:12px;height:12px;border-radius:50%;background:var(--muted);display:block}
+    .step-rail .rail-node.ok i{background:var(--green)}
+    .step-rail .rail-node.warn i{background:var(--yellow)}
+    .step-rail .rail-node.bad i{background:var(--red)}
+    .step-rail .rail-node span{font-size:10px;color:var(--muted);text-align:center;line-height:1.2}
+    .step-rail .rail-line{flex:1 1 24px;height:2px;background:var(--border);margin-top:6px;min-width:14px}
+    .step-rail .rail-count{font-size:12px;color:var(--muted);align-self:center;margin-left:12px}
+    details.raw{border:1px solid var(--border);border-radius:9px;padding:9px 12px;background:var(--surface-2);margin-top:12px}
+    details.raw > summary{cursor:pointer;font-size:12px;color:var(--muted)}
+    details.raw .cards-2{margin-top:10px}
     .alert-list li{display:flex;align-items:flex-start;gap:8px;border-radius:9px;padding:10px 12px;
       background:rgba(234,179,8,.08);border:1px solid rgba(234,179,8,.35)}
     .alert-list li.bad{background:rgba(239,68,68,.08);border-color:rgba(239,68,68,.35)}
@@ -197,6 +223,12 @@
       display:flex;flex-direction:column;gap:7px}
     .domain-check-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
     .aspects{display:flex;gap:6px;flex-wrap:wrap}
+    .aspect{display:inline-flex;align-items:center;gap:6px;font-size:12px;border:1px solid var(--border);
+      border-radius:999px;padding:4px 10px;background:var(--surface)}
+    .aspect i{width:8px;height:8px;border-radius:50%;background:var(--muted);flex:0 0 auto}
+    .aspect.ok i{background:var(--green)}
+    .aspect.bad i{background:var(--red)}
+    .aspect.warn i{background:var(--yellow)}
     .setup-list li{align-items:flex-start;flex-wrap:wrap}
     .step-main{flex:1;min-width:0;display:flex;flex-direction:column;gap:6px}
     .step-main .note{margin-top:0}
@@ -370,6 +402,7 @@
             </div>
             <button id="stCheckAllBtn" class="btn btn-p small" type="button">Periksa semua</button>
           </div>
+          <div class="step-rail" id="stRail"></div>
           <ol class="list setup-list" id="setupSteps"></ol>
           <div id="setupMsg" class="out" role="status" aria-live="polite"></div>
         </section>
@@ -387,32 +420,36 @@
           <p class="note" id="dgFetched">Belum ada data diambil.</p>
           <div id="dgState" class="state" role="status"></div>
           <div id="dgWrap" hidden>
-            <div class="cards-2">
-              <div>
-                <h3>Helper root</h3>
-                <dl class="kv" id="dgHelper"></dl>
+            <div class="tiles" id="dgTiles"></div>
+            <h3>Komponen</h3>
+            <div class="dotgrid" id="dgDots"></div>
+            <h3>Domain</h3>
+            <div class="dotgrid" id="dgCfDomains"></div>
+            <details class="raw">
+              <summary>Fakta mentah (nilai apa adanya)</summary>
+              <div class="cards-2">
+                <div>
+                  <h3>Helper root</h3>
+                  <dl class="kv" id="dgHelper"></dl>
+                </div>
+                <div>
+                  <h3>Aplikasi</h3>
+                  <dl class="kv" id="dgApp"></dl>
+                </div>
+                <div>
+                  <h3>Database</h3>
+                  <dl class="kv" id="dgDb"></dl>
+                </div>
+                <div>
+                  <h3>Cloudflare</h3>
+                  <dl class="kv" id="dgCf"></dl>
+                </div>
+                <div>
+                  <h3>Tunnel</h3>
+                  <dl class="kv" id="dgTunnel"></dl>
+                </div>
               </div>
-              <div>
-                <h3>Aplikasi</h3>
-                <dl class="kv" id="dgApp"></dl>
-              </div>
-              <div>
-                <h3>Database</h3>
-                <dl class="kv" id="dgDb"></dl>
-              </div>
-              <div>
-                <h3>Cloudflare</h3>
-                <dl class="kv" id="dgCf"></dl>
-              </div>
-              <div>
-                <h3>Tunnel</h3>
-                <dl class="kv" id="dgTunnel"></dl>
-              </div>
-              <div>
-                <h3>Domain temp mail</h3>
-                <ul class="list" id="dgCfDomains"></ul>
-              </div>
-            </div>
+            </details>
           </div>
           <div id="dgMsg" class="out" role="status" aria-live="polite"></div>
         </section>
@@ -425,28 +462,30 @@
             </div>
           </div>
 
+          <h3>Status unit</h3>
+          <div class="dotgrid" id="svUnits"></div>
+
           <h3>Aksi sistem</h3>
-          <div class="server-actions">
-            <button id="svServiceBtn" class="btn btn-s" type="button">Cek service</button>
-            <button id="svBackupBtn" class="btn btn-s" type="button">Backup sekarang</button>
-            <button id="svRestartBtn" class="btn btn-danger" type="button">Restart service</button>
-            <button id="svDoctorBtn" class="btn btn-s" type="button">Doctor</button>
-            <div class="field log-lines">
-              <label for="svLogLines">Baris log</label>
-              <select id="svLogLines">
-                <option value="50">50 baris</option>
-                <option value="100" selected>100 baris</option>
-                <option value="200">200 baris</option>
-                <option value="500">500 baris</option>
-              </select>
-            </div>
-            <button id="svLogBtn" class="btn btn-p" type="button">Lihat log</button>
+          <div class="actions-grid">
+            <button id="svServiceBtn" class="action-tile" type="button"><i>◍</i><b>Cek service</b><small>perbarui status unit</small></button>
+            <button id="svBackupBtn" class="action-tile" type="button"><i>⤓</i><b>Backup</b><small>salinan database</small></button>
+            <button id="svDoctorBtn" class="action-tile" type="button"><i>✚</i><b>Doctor</b><small>periksa host</small></button>
+            <button id="svRestartBtn" class="action-tile danger" type="button"><i>⟳</i><b>Restart</b><small>service tempmail</small></button>
+          </div>
+
+          <h3>Log service</h3>
+          <div class="chips" id="svLogChips" role="group" aria-label="Jumlah baris log">
+            <button class="chip" type="button" data-lines="50">50</button>
+            <button class="chip" type="button" data-lines="100" aria-pressed="true">100</button>
+            <button class="chip" type="button" data-lines="200">200</button>
+            <button class="chip" type="button" data-lines="500">500</button>
+            <button id="svLogBtn" class="btn btn-p small" type="button">Lihat log</button>
           </div>
 
           <h3>cloudflared (konektor tunnel)</h3>
-          <div class="server-actions">
-            <button id="svTnStatusBtn" class="btn btn-s" type="button">Status tunnel</button>
-            <button id="svTnRestartBtn" class="btn btn-danger" type="button">Restart tunnel</button>
+          <div class="actions-grid">
+            <button id="svTnStatusBtn" class="action-tile" type="button"><i>◍</i><b>Status tunnel</b><small>unit + daftar tunnel</small></button>
+            <button id="svTnRestartBtn" class="action-tile danger" type="button"><i>⟳</i><b>Restart tunnel</b><small>konektor cloudflared</small></button>
           </div>
           <form id="svTnForm" class="grid">
             <div class="field">
@@ -765,8 +804,8 @@
     </div>
   </div>
 
-  <script src="/app/app.js?v=8"></script>
-  <script src="/app/admin.js?v=8"></script>
-  <script src="/app/admin-nav.js?v=8"></script>
+  <script src="/app/app.js?v=9"></script>
+  <script src="/app/admin.js?v=9"></script>
+  <script src="/app/admin-nav.js?v=9"></script>
 </body>
 </html>
