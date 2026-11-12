@@ -205,6 +205,15 @@ func SetupRouter() *gin.Engine {
 		c.Redirect(http.StatusFound, "/app/")
 	})
 
+	// Admin panel shortcut. Deliberately not linked from the inbox UI: the operator types
+	// /admin, and the panel still requires an admin JWT.
+	r.GET("/admin", func(c *gin.Context) {
+		c.Redirect(http.StatusFound, "/app/admin.html")
+	})
+	r.GET("/admin/", func(c *gin.Context) {
+		c.Redirect(http.StatusFound, "/app/admin.html")
+	})
+
 	// Auth routes (public)
 	loginMW := ginLimiterMiddleware(loginLimiter)
 	r.POST("/api/auth/login", loginMW, authHandler.Login)
@@ -244,6 +253,30 @@ func SetupRouter() *gin.Engine {
 		// Naming rules for auto-generated inbox addresses
 		admin.GET("/naming-rules", handlers.GetNamingRules)
 		admin.PUT("/naming-rules", handlers.UpdateNamingRules)
+
+		// Cloudflare control panel: profiles, domains, routing, Worker, tunnel, copies
+		admin.GET("/cloudflare/status", handlers.CFStatus)
+		admin.GET("/cloudflare/profiles", handlers.CFListProfiles)
+		admin.POST("/cloudflare/profiles", handlers.CFCreateProfile)
+		admin.PUT("/cloudflare/profiles/:id", handlers.CFUpdateProfile)
+		admin.DELETE("/cloudflare/profiles/:id", handlers.CFDeleteProfile)
+		admin.POST("/cloudflare/profiles/:id/activate", handlers.CFActivateProfile)
+		admin.POST("/cloudflare/profiles/:id/deploy-worker", handlers.CFDeployWorker)
+		admin.DELETE("/cloudflare/profiles/:id/worker", handlers.CFDeleteWorker)
+		admin.GET("/cloudflare/domains", handlers.CFListDomains)
+		admin.POST("/cloudflare/domains", handlers.CFAddDomain)
+		admin.DELETE("/cloudflare/domains/:domain", handlers.CFDeleteDomain)
+		admin.POST("/cloudflare/domains/:domain/routing", handlers.CFSetDomainRouting)
+		admin.GET("/cloudflare/tunnel", handlers.CFTunnelStatus)
+		admin.PUT("/cloudflare/tunnel", handlers.CFSetTunnel)
+		admin.POST("/cloudflare/tunnel/create", handlers.CFCreateTunnel)
+		admin.GET("/cloudflare/copies", handlers.CFGetCopies)
+		admin.PUT("/cloudflare/copies", handlers.CFSetCopies)
+		admin.POST("/cloudflare/import", handlers.CFImport)
+
+		// Root helper panel: local facts plus actions executed by the root helper via file queue
+		admin.GET("/system/status", handlers.SystemStatus)
+		admin.POST("/system/action", handlers.SystemAction)
 	}
 
 	// SSE route - auth via query param (EventSource cannot send custom headers)

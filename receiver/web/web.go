@@ -7,6 +7,9 @@ import (
 	"os"
 	"strings"
 
+	"receiver/database"
+	"receiver/repository"
+
 	"github.com/gin-gonic/gin"
 )
 
@@ -20,14 +23,23 @@ func StaticFS() http.FileSystem {
 }
 
 // ConfigHandler returns public configuration (domains, site name) for the frontend.
+// Domains come from the Cloudflare records managed by the admin panel, so adding a domain
+// shows up without restarting the service; DOMAINS from the env file is the fallback.
 func ConfigHandler(c *gin.Context) {
 	domains := []string{}
-	domainsStr := os.Getenv("DOMAINS")
-	if domainsStr != "" {
-		for _, d := range strings.Split(domainsStr, ",") {
-			d = strings.TrimSpace(d)
-			if d != "" {
-				domains = append(domains, d)
+	if db := database.Conn(); db != nil {
+		if listed, err := repository.ListedDomains(db); err == nil {
+			domains = listed
+		}
+	}
+	if len(domains) == 0 {
+		domainsStr := os.Getenv("DOMAINS")
+		if domainsStr != "" {
+			for _, d := range strings.Split(domainsStr, ",") {
+				d = strings.TrimSpace(d)
+				if d != "" {
+					domains = append(domains, d)
+				}
 			}
 		}
 	}

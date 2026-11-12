@@ -2,7 +2,6 @@ package handlers
 
 import (
 	"net/http"
-	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -55,12 +54,12 @@ func CreateInboxAPI(c *gin.Context) {
 				return
 			}
 			if req.Domain == "" {
-				domains := strings.Split(os.Getenv("DOMAINS"), ",")
-				if len(domains) == 0 || strings.TrimSpace(domains[0]) == "" {
+				domains := configuredDomains()
+				if len(domains) == 0 {
 					c.JSON(http.StatusBadRequest, gin.H{"error": "No domain configured"})
 					return
 				}
-				req.Domain = strings.TrimSpace(domains[0])
+				req.Domain = domains[0]
 			}
 			domain := req.Domain
 			req.Username = rules.GenerateUnique(func(addr string) bool {
@@ -69,13 +68,13 @@ func CreateInboxAPI(c *gin.Context) {
 			})
 		}
 		if req.Domain == "" {
-			// Pick first domain from DOMAINS env
-			domains := strings.Split(os.Getenv("DOMAINS"), ",")
-			if len(domains) == 0 || domains[0] == "" {
+			// Pick the first domain managed in the admin panel (DOMAINS env as fallback)
+			domains := configuredDomains()
+			if len(domains) == 0 {
 				c.JSON(http.StatusBadRequest, gin.H{"error": "No domain configured"})
 				return
 			}
-			req.Domain = strings.TrimSpace(domains[0])
+			req.Domain = domains[0]
 		}
 		req.Email = req.Username + "@" + req.Domain
 	}

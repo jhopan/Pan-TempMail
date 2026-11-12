@@ -138,6 +138,25 @@ func migrate(db *sql.DB) error {
 		`CREATE INDEX IF NOT EXISTS idx_messages_inbox_id ON messages(inbox_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_messages_received_at ON messages(received_at DESC)`,
 		`CREATE INDEX IF NOT EXISTS idx_inboxes_email ON inboxes(email)`,
+		`CREATE TABLE IF NOT EXISTS cf_profiles (
+			id TEXT PRIMARY KEY,
+			label TEXT NOT NULL DEFAULT '',
+			account_id TEXT NOT NULL,
+			token TEXT NOT NULL DEFAULT '',
+			worker_deployed INTEGER NOT NULL DEFAULT 0,
+			created_at TEXT NOT NULL DEFAULT '',
+			updated_at TEXT NOT NULL DEFAULT ''
+		)`,
+		`CREATE TABLE IF NOT EXISTS cf_domains (
+			domain TEXT PRIMARY KEY,
+			profile_id TEXT NOT NULL,
+			zone_id TEXT NOT NULL DEFAULT '',
+			enabled INTEGER NOT NULL DEFAULT 0,
+			routing INTEGER NOT NULL DEFAULT 0,
+			created_at TEXT NOT NULL DEFAULT '',
+			updated_at TEXT NOT NULL DEFAULT ''
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_cf_domains_profile ON cf_domains(profile_id)`,
 	}
 
 	for _, q := range queries {
