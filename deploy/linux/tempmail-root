@@ -38,6 +38,7 @@ DATA_DIR = os.environ.get("HELPER_DATA_DIR", "/opt/tempmail/data")
 TUNNEL_CONFIG = os.environ.get("HELPER_TUNNEL_CONFIG", "/etc/cloudflared/config.yml")
 TUNNEL_CERT = os.environ.get("HELPER_TUNNEL_CERT", "/root/.cloudflared/cert.pem")
 WORKER_DIR = os.environ.get("HELPER_WORKER_DIR", "/opt/tempmail/worker")
+BACKUP_DIR = os.environ.get("HELPER_BACKUP_DIR", "/opt/tempmail/backups")
 
 IN_DIR = os.path.join(HELPER_DIR, "in")
 OUT_DIR = os.path.join(HELPER_DIR, "out")
@@ -50,17 +51,22 @@ COMMAND_TIMEOUT = 30
 INSTALL_TIMEOUT = 90
 ID_RE = re.compile(r"^[0-9a-f]{16}$")
 TOKEN_RE = re.compile(r"^[A-Za-z0-9._~-]{20,4096}$")
+CONFIG_LINE_RE = re.compile(r"^([A-Za-z0-9_.-]+)\s*:\s*(.*)$")
+BLOCK_SCALAR_RE = re.compile(r"^[|>][+-]?$")
+TUNNEL_MAX_HOSTS = 5
 
 # action -> (cooldown seconds, fire and forget)
 ACTIONS = {
     "service-status": (0, False),
     "restart-service": (10, True),
     "backup-now": (10, False),
+    "backup-list": (0, False),
     "logs": (0, False),
     "doctor": (0, False),
     "tunnel-status": (0, False),
     "tunnel-install": (30, False),
     "tunnel-restart": (10, False),
+    "tunnel-config": (0, False),
     "tunnel-logout": (60, True),
 }
 
@@ -286,6 +292,36 @@ def action_backup_now(_):
     detail = (out + "\n" if out else "") + "result: " + (result.strip() or "unknown")
     return result.strip() == "success", detail
 
+def action_backup_list(_):
+    """List the SQLite backup directory so the panel can show the last backup.
+
+    A missing directory is a normal state (the timer may not have run yet), never an error.
+    """
+    files = []
+    try:
+        with os.scandir(BACKUP_DIR) as entries:
+            for entry in entries:
+                try:
+                    if not entry.is_file():
+                        continue
+                    info = entry.stat()
+                except OSError:
+                    continue
+                files.append((info.st_mtime, entry.name, info.st_size))
+    except OSError as exc:
+        log("direktori backup %s tidak terbaca: %s" % (BACKUP_DIR, exc))
+
+    files.sort(key=lambda item: item[0], reverse=True)
+    latest = files[0] if files else None
+    lines = [
+        "count: %d" % len(files),
+        "latest: " + (latest[1] if latest else "-"),
+        "latest_bytes: %d" % (latest[2] if latest else 0),
+        "latest_age_seconds: %d" % (max(0, int(time.time() - latest[0])) if latest else 0),
+        "total_bytes: %d" % sum(item[2] for item in files),
+    ]
+    return True, "\n".join(lines)
+
 
 def action_logs(request):
     code, out = run(
@@ -349,6 +385,120 @@ def action_doctor(_):
     return ok, "\n".join(lines)
 
 
+def config_unquote(value):
+    """Drop the surrounding quotes of a YAML scalar so `hostname: "a.b"` yields a.b."""
+    text = value.strip()
+    if len(text) >= 2 and text[0] in "\"'" and text[-1] == text[0]:
+        return text[1:-1]
+    return text
+
+def config_strip_comment(line):
+    """Cut a trailing `# comment` unless the `#` sits inside a quoted value."""
+    quote = ""
+    for index, char in enumerate(line):
+        if quote:
+            if char == quote:
+                quote = ""
+        elif char in "\"'":
+            quote = char
+        elif char == "#":
+            return line[:index]
+    return line
+
+def config_entries(text):
+    """Return (indent, is_item, key, value) for every `key: value` line, block scalars resolved.
+
+    A hand-written parser keeps the root helper free of a PyYAML dependency. It reads sequence
+    items (`- hostname: x`) as the mapping entries they are, and only the few keys the panel
+    reports are read out of the result, so no value is ever echoed back verbatim.
+    """
+    lines = text.splitlines()
+    entries = []
+    for index, raw in enumerate(lines):
+        line = config_strip_comment(raw)
+        stripped = line.strip()
+        if not stripped:
+            continue
+        is_item = stripped.startswith("-")
+        body = stripped[1:].strip() if is_item else stripped
+        match = CONFIG_LINE_RE.match(body)
+        if not match:
+            continue
+        indent = len(line) - len(line.lstrip())
+        key, value = match.group(1).lower(), match.group(2).strip()
+        if not value or BLOCK_SCALAR_RE.match(value):
+            value = ""
+            for continuation in lines[index + 1:]:
+                if not continuation.strip():
+                    continue
+                if len(continuation) - len(continuation.lstrip()) <= indent:
+                    break
+                value = config_strip_comment(continuation).strip()
+                break
+        entries.append((indent, is_item, key, config_unquote(value)))
+    return entries
+
+def config_value(entries, keys):
+    for _, _, key, value in entries:
+        if key in keys and value:
+            return value
+    return ""
+
+def config_ingress_hosts(entries):
+    """Collect the `hostname:` values under `ingress:`, capped at TUNNEL_MAX_HOSTS.
+
+    The block ends at the first non-item line that is not indented deeper than `ingress:` itself,
+    so both `- hostname:` forms (indented and aligned with the key) are read.
+    """
+    hosts = []
+    for index, (indent, _, key, _) in enumerate(entries):
+        if key != "ingress":
+            continue
+        for child_indent, is_item, child_key, child_value in entries[index + 1:]:
+            if child_indent <= indent and not is_item:
+                break
+            if child_key == "hostname" and child_value and child_value not in hosts:
+                hosts.append(child_value)
+                if len(hosts) >= TUNNEL_MAX_HOSTS:
+                    return hosts
+    return hosts
+
+def action_tunnel_config(_):
+    """Report how the named tunnel authenticates, without ever touching a Cloudflare API token.
+
+    Read-only and token-free: the token is only tested for presence, so the output stays safe to
+    paste into a chat. A missing or unreadable file is reported as `config_file: missing` with
+    ok=True, so the panel can still render a partial state.
+    """
+    present = os.path.isfile(TUNNEL_CONFIG)
+    entries = []
+    if present:
+        try:
+            with open(TUNNEL_CONFIG, "r", encoding="utf-8", errors="replace") as handle:
+                entries = config_entries(handle.read())
+        except OSError as exc:
+            log("tunnel config %s tidak terbaca: %s" % (TUNNEL_CONFIG, exc))
+            present = False
+
+    token_present = any(value for _, _, key, value in entries if key == "token")
+    credentials = config_value(entries, ("credentials-file", "credentials_file"))
+    if token_present:
+        mode = "token"
+    elif credentials:
+        mode = "credentials"
+    else:
+        mode = "unknown"
+
+    lines = [
+        "mode: " + mode,
+        "tunnel_id: " + (config_value(entries, ("tunnel_id", "tunnel")) or "-"),
+        "credentials_file: " + (credentials or "-"),
+        "ingress_hosts: " + (",".join(config_ingress_hosts(entries)) or "-"),
+        "token_present: " + ("yes" if token_present else "no"),
+        "config_file: " + ("present" if present else "missing"),
+    ]
+    return True, "\n".join(lines)
+
 def action_tunnel_status(_):
     if not cloudflared_available():
         return False, "cloudflared tidak terpasang"
@@ -404,11 +554,13 @@ HANDLERS = {
     "service-status": action_service_status,
     "restart-service": action_restart_service,
     "backup-now": action_backup_now,
+    "backup-list": action_backup_list,
     "logs": action_logs,
     "doctor": action_doctor,
     "tunnel-status": action_tunnel_status,
     "tunnel-install": action_tunnel_install,
     "tunnel-restart": action_tunnel_restart,
+    "tunnel-config": action_tunnel_config,
     "tunnel-logout": action_tunnel_logout,
 }
 

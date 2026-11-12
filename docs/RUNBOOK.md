@@ -122,9 +122,9 @@ Important:
 
 ## Panel server actions (root helper)
 
-The panel section `Server` can restart the app service, run the SQLite backup, show journald logs,
-run doctor checks, and install/restart/logout the tunnel. All of it goes through the root helper; the
-app itself stays unprivileged.
+The panel section `Server` can restart the app service, run the SQLite backup, list the SQLite
+backups, show journald logs, run doctor checks, read the tunnel config, and install/restart/logout the
+tunnel. All of it goes through the root helper; the app itself stays unprivileged.
 
 Check the helper:
 
@@ -151,9 +151,11 @@ Notes:
 
 - `restart-service` waits 2 seconds by default before restarting, so the HTTP answer reaches the panel; the panel then polls `/health` until the service is back.
 - `tunnel-install` needs a connector token from the panel's Tunnel section (`POST /api/admin/cloudflare/tunnel/create`).
+- `tunnel-config` reports how the named tunnel authenticates (mode, tunnel id, credentials path, ingress hostnames, token presence) from `/etc/cloudflared/config.yml`; it is read-only and never prints the token.
+- `backup-list` reports `count`/`latest`/`latest_bytes`/`latest_age_seconds`/`total_bytes` for `/opt/tempmail/backups`; an empty or missing directory answers `latest: -` with zeros, not an error.
 - `tunnel-logout` deletes `/etc/cloudflared` and `/root/.cloudflared`; it requires the operator to type `RESET` in the panel.
 - A rejected request still produces a result file, and the request file is always removed afterwards; if requests pile up in `helper/in`, check `journalctl -u tempmail-root.service`.
-- Helper environment overrides (`HELPER_SYSTEMCTL`, `HELPER_JOURNALCTL`, `HELPER_CLOUDFLARED`, `HELPER_TEST_MODE`) exist for offline testing of the helper itself; the installed systemd unit never sets them, so do not add them to the unit.
+- Helper environment overrides (`HELPER_SYSTEMCTL`, `HELPER_JOURNALCTL`, `HELPER_CLOUDFLARED`, `HELPER_TUNNEL_CONFIG`, `HELPER_BACKUP_DIR`, `HELPER_TEST_MODE`) exist for offline testing of the helper itself; the installed systemd unit never sets them, so do not add them to the unit.
 
 ## Admin password
 

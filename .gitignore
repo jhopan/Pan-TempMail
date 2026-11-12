@@ -20,6 +20,10 @@ frontend/node_modules/
 frontend/.next/
 frontend/out/
 
+# Python bytecode (helper root ditulis Python; py_compile membuat ini)
+__pycache__/
+*.pyc
+
 # OS
 .DS_Store
 Thumbs.db

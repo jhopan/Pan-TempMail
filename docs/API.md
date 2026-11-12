@@ -516,8 +516,17 @@ requests go to the root helper through `/opt/tempmail/data/helper` (see `docs/RU
 | GET | `/api/admin/system/status` | - | local facts, never blocks on the helper |
 | POST | `/api/admin/system/action` | `{"action":"logs","lines":100}` | helper result |
 
-Actions: `service-status`, `restart-service`, `backup-now`, `logs`, `doctor`, `tunnel-status`,
-`tunnel-install` (needs `token`), `tunnel-restart`, `tunnel-logout` (needs `confirm: "RESET"`).
+Actions: `service-status`, `restart-service`, `backup-now`, `backup-list`, `logs`, `doctor`,
+`tunnel-status`, `tunnel-config`, `tunnel-install` (needs `token`), `tunnel-restart`,
+`tunnel-logout` (needs `confirm: "RESET"`).
+
+`tunnel-config` and `backup-list` take no fields and always answer `ok: true`; they read
+`/etc/cloudflared/config.yml` (`HELPER_TUNNEL_CONFIG`) and the backup directory
+(`HELPER_BACKUP_DIR`, default `/opt/tempmail/backups`). `tunnel-config` reports
+`mode` (`token`/`credentials`/`unknown`), `tunnel_id`, `credentials_file`, `ingress_hosts`,
+`token_present`, `config_file` (`present`/`missing`) as `key: value` lines, and never prints the
+token itself. `backup-list` reports `count`, `latest`, `latest_bytes`, `latest_age_seconds`,
+`total_bytes`, all zero/`-` when the directory is empty or missing.
 
 ```bash
 BASE=http://127.0.0.1:8081

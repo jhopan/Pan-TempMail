@@ -44,6 +44,9 @@ func TestMessageSeriesBucketsInsertedMessages(t *testing.T) {
 	insertSeriesMessage(t, db, inboxID, stamp(now.Add(-30*time.Hour)))                // di luar query
 	insertSeriesMessage(t, db, inboxID, stamp(now.Add(-23*time.Hour-50*time.Minute))) // di luar jendela bucket
 	insertSeriesMessage(t, db, inboxID, stamp(now.Add(2*time.Hour)))                  // clock skew -> bucket 23
+	// PostgreSQL menyerahkan kolom TIMESTAMP ke Go sebagai time.Time, dan database/sql
+	// mengubahnya menjadi teks RFC3339 ("2026-11-12T12:00:00Z") saat dipindai ke string.
+	insertSeriesMessage(t, db, inboxID, now.Add(-2*time.Hour).UTC().Format("2006-01-02T15:04:05Z")) // jam 12:00 -> bucket 21
 
 	series, capped, err := MessageSeries(db, now, 24, 5000)
 	if err != nil {
@@ -58,8 +61,8 @@ func TestMessageSeriesBucketsInsertedMessages(t *testing.T) {
 	if series[20] != 2 {
 		t.Errorf("series[20] = %d, want 2 (dua baris 3 jam lalu)", series[20])
 	}
-	if series[21] != 0 {
-		t.Errorf("series[21] = %d, want 0", series[21])
+	if series[21] != 1 {
+		t.Errorf("series[21] = %d, want 1 (baris berformat RFC3339 seperti PostgreSQL)", series[21])
 	}
 	if series[22] != 1 {
 		t.Errorf("series[22] = %d, want 1 (baris satu jam lalu)", series[22])
@@ -71,8 +74,8 @@ func TestMessageSeriesBucketsInsertedMessages(t *testing.T) {
 	for _, n := range series {
 		total += n
 	}
-	if total != 5 {
-		t.Errorf("sum(series) = %d, want 5: baris rusak dan baris di luar jendela harus diabaikan", total)
+	if total != 6 {
+		t.Errorf("sum(series) = %d, want 6: baris rusak dan baris di luar jendela harus diabaikan", total)
 	}
 }
 

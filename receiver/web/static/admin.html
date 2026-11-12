@@ -465,6 +465,9 @@
           <h3>Status unit</h3>
           <div class="dotgrid" id="svUnits"></div>
 
+          <h3>Backup database</h3>
+          <div class="tiles" id="svBackups"></div>
+
           <h3>Aksi sistem</h3>
           <div class="actions-grid">
             <button id="svServiceBtn" class="action-tile" type="button"><i>◍</i><b>Cek service</b><small>perbarui status unit</small></button>
@@ -501,7 +504,7 @@
             <div class="field">
               <label for="svTnReset">Ketik RESET untuk logout tunnel</label>
               <input id="svTnReset" autocomplete="off" spellcheck="false" placeholder="RESET">
-              <span class="hint">Menghapus credential + service cloudflared di server.</span>
+              <span class="hint">Menghapus <span class="mono">/root/.cloudflared</span> + <span class="mono">/etc/cloudflared</span>. Kalau tunnel dipasang lewat <span class="mono">cert.pem</span>/credentials-file (bukan connector token), konektor berhenti sampai dipasang ulang.</span>
             </div>
             <div class="form-actions">
               <button id="svTnLogoutBtn" class="btn btn-danger" type="submit">Logout tunnel</button>
@@ -645,7 +648,7 @@
           </form>
           <p class="note">Pasang, restart, dan logout konektor <span class="mono">cloudflared</span> ada di panel <b>Server</b>.</p>
           <h3>Konektor di server (tanpa API token)</h3>
-          <p class="note">Dibaca helper root, jadi tetap jalan walau profil belum punya token. Info di atas datang dari Cloudflare API.</p>
+          <div class="dotgrid" id="tnHostInfo"></div>
           <div class="row-actions">
             <button id="tnHelperBtn" class="btn btn-s" type="button">Cek konektor</button>
           </div>
@@ -805,8 +808,8 @@
     </div>
   </div>
 
-  <script src="/app/app.js?v=10"></script>
-  <script src="/app/admin.js?v=10"></script>
-  <script src="/app/admin-nav.js?v=10"></script>
+  <script src="/app/app.js?v=12"></script>
+  <script src="/app/admin.js?v=12"></script>
+  <script src="/app/admin-nav.js?v=12"></script>
 </body>
 </html>

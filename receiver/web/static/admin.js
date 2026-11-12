@@ -73,6 +73,7 @@ const ui = {
   tnSaveBtn: document.getElementById('tnSaveBtn'),
   tnCreateBtn: document.getElementById('tnCreateBtn'),
   tnHelperBtn: document.getElementById('tnHelperBtn'),
+  tnHostInfo: document.getElementById('tnHostInfo'),
   tnHelperMeta: document.getElementById('tnHelperMeta'),
   tnHelperOut: document.getElementById('tnHelperOut'),
   copiesState: document.getElementById('copiesState'),
@@ -103,6 +104,7 @@ const ui = {
   svServiceBtn: document.getElementById('svServiceBtn'),
   svLogChips: document.getElementById('svLogChips'),
   svUnits: document.getElementById('svUnits'),
+  svBackups: document.getElementById('svBackups'),
   svLogBtn: document.getElementById('svLogBtn'),
   svBackupBtn: document.getElementById('svBackupBtn'),
   svRestartBtn: document.getElementById('svRestartBtn'),
@@ -542,7 +544,11 @@ async function loadDomains() {
   ui.domainsBody.replaceChildren();
   s.loading('Memuat domain...');
   try {
-    const domains = await cf('/domains');
+    // Daftar profil dipakai dropdown di form tambah domain; kalau panel Domain dibuka
+    // lebih dulu, dropdown hanya berisi "profil aktif" sampai profil ikut dimuat.
+    const domains = state.profiles.length
+      ? await cf('/domains')
+      : (await Promise.all([cf('/domains'), loadProfiles()]))[0];
     state.domains = Array.isArray(domains) ? domains : [];
     renderDomains();
   } catch (err) {
@@ -605,7 +611,28 @@ function renderDomains() {
         await checkDomainPanel(d.domain);
       });
     });
-    tr.append(actionCell([inspect, toggle, drop]));
+    const actions = [inspect, toggle];
+    // Domain yang masih routing aktif bisa dimatikan catch-all-nya sekaligus, supaya
+    // menghapus dari panel tidak meninggalkan catch-all yang mengarah ke Worker kosong.
+    if (d.routing) {
+      const dropCold = button('Matikan & hapus', 'btn btn-danger small');
+      dropCold.title = 'Matikan catch-all di Cloudflare lebih dulu, lalu hapus domain dari panel.';
+      dropCold.addEventListener('click', function () {
+        if (!window.confirm('Matikan catch-all Email Routing ' + d.domain + ', lalu hapus dari panel? Email ke domain itu berhenti sampai catch-all diaktifkan lagi.')) return;
+        run(dropCold, ui.domainsMsg, async function () {
+          await cf('/domains/' + encodeURIComponent(d.domain) + '/routing', {
+            method: 'POST',
+            body: JSON.stringify({ routing: false, unlock_dns: false }),
+          });
+          await cf('/domains/' + encodeURIComponent(d.domain), { method: 'DELETE' });
+          await loadDomains();
+          message(ui.domainsMsg, 'ok', d.domain + ': catch-all dimatikan dan domain dihapus dari panel');
+        });
+      });
+      actions.push(dropCold);
+    }
+    actions.push(drop);
+    tr.append(actionCell(actions));
     ui.domainsBody.append(tr);
   });
 }
@@ -736,6 +763,37 @@ async function loadTunnel() {
   } catch (err) {
     s.error(err);
   }
+  loadTunnelHostInfo();
+}
+
+// loadTunnelHostInfo membaca konfigurasi konektor di host lewat helper root: mode auth,
+// tunnel id, dan hostname ingress. Ini tidak butuh API token Cloudflare.
+async function loadTunnelHostInfo() {
+  ui.tnHostInfo.replaceChildren(dotCell('Konektor', 'memuat', 'warn'));
+  let info;
+  try {
+    info = parseActionLines(await apiPost('/action', { action: 'tunnel-config' }));
+  } catch (err) {
+    const failure = apiFailure(err);
+    ui.tnHostInfo.replaceChildren(dotCell('Helper', failure.message.slice(0, 34), 'warn'));
+    return;
+  }
+  const mode = String(info.mode || 'unknown');
+  const modeLabel = mode === 'token' ? 'connector token' : (mode === 'credentials' ? 'credentials-file' : 'tidak dikenal');
+  const hosts = String(info.ingress_hosts || '-');
+  const cells = [
+    dotCell('Mode', modeLabel, mode === 'unknown' ? 'warn' : 'ok'),
+    dotCell('Tunnel', (info.tunnel_id && info.tunnel_id !== '-' ? info.tunnel_id.slice(0, 8) : 'belum ada'),
+      info.tunnel_id && info.tunnel_id !== '-' ? 'ok' : 'warn'),
+    dotCell('Ingress', hosts === '-' ? 'belum ada' : hosts.split(',').length + ' host: ' + hosts.split(',')[0],
+      hosts === '-' ? 'warn' : 'ok'),
+    dotCell('Config', info.config_file === 'present' ? 'ada' : 'hilang',
+      info.config_file === 'present' ? 'ok' : 'bad'),
+  ];
+  if (mode === 'credentials') {
+    cells.push(dotCell('Logout', 'akan mematikan konektor', 'warn'));
+  }
+  ui.tnHostInfo.replaceChildren(...cells);
 }
 
 function renderTunnel() {
@@ -1669,15 +1727,59 @@ function shortUnit(unit) {
   return unit.replace(/\.service$/, '').replace(/\.timer$/, ' timer');
 }
 
-// loadServerPanel mengisi status unit saat panel Server pertama dibuka. Aksi ini read-only,
-// jadi tidak menyentuh keluaran log yang sedang dibaca operator.
+// parseActionLines mengubah keluaran helper berbentuk "kunci: nilai" menjadi objek.
+function parseActionLines(body) {
+  const out = {};
+  const output = body && body.output ? String(body.output) : '';
+  output.split('\n').forEach(function (line) {
+    const trimmed = line.trim();
+    if (!trimmed) return;
+    const at = trimmed.indexOf(':');
+    if (at === -1) return;
+    out[trimmed.slice(0, at).trim()] = trimmed.slice(at + 1).trim();
+  });
+  return out;
+}
+
+// formatAge menampilkan umur dalam detik sebagai teks pendek berbahasa Indonesia.
+function formatAge(seconds) {
+  const value = Number(seconds);
+  if (!isFinite(value) || value < 0) return '-';
+  if (value < 60) return Math.round(value) + ' detik';
+  if (value < 3600) return Math.round(value / 60) + ' menit';
+  if (value < 86400) return Math.round(value / 3600) + ' jam';
+  return Math.round(value / 86400) + ' hari';
+}
+
+// renderBackupTile menampilkan hasil aksi backup-list sebagai satu ubin angka.
+function renderBackupTile(body) {
+  const info = parseActionLines(body);
+  const count = Number(info.count);
+  const latest = info.latest && info.latest !== '-' ? info.latest : '';
+  if (!latest) {
+    ui.svBackups.replaceChildren(statTile('Backup terakhir', 'belum ada',
+      info.count === undefined ? 'helper belum menjawab' : count + ' berkas di direktori backup'));
+    return;
+  }
+  ui.svBackups.replaceChildren(statTile('Backup terakhir', latest.replace(/\.(db|sqlite)$/, ''),
+    formatBytes(Number(info.latest_bytes)) + ' · ' + formatAge(Number(info.latest_age_seconds)) + ' lalu · ' +
+      count + ' berkas (' + formatBytes(Number(info.total_bytes)) + ')'));
+}
+
 async function loadServerPanel() {
   ui.svUnits.replaceChildren(dotCell('Unit', 'memuat', 'warn'));
+  ui.svBackups.replaceChildren(statTile('Backup terakhir', 'memuat', 'helper root'));
   try {
     renderServiceUnits(await apiPost('/action', { action: 'service-status' }));
   } catch (err) {
     const info = apiFailure(err);
     ui.svUnits.replaceChildren(dotCell('Helper', info.message.slice(0, 34), 'warn'));
+  }
+  try {
+    renderBackupTile(await apiPost('/action', { action: 'backup-list' }));
+  } catch (err) {
+    const info = apiFailure(err);
+    ui.svBackups.replaceChildren(statTile('Backup terakhir', 'tidak terbaca', info.message.slice(0, 40)));
   }
 }
 
@@ -2196,6 +2298,7 @@ function bindSections() {
       message(ui.tnHelperMeta, failed ? 'error' : 'ok',
         failed ? (body.error || 'Helper menolak permintaan') : 'Status konektor cloudflared dari server diambil',
         'status: ' + ((body && body.status) || 'unknown'));
+      loadTunnelHostInfo();
     });
   });
 

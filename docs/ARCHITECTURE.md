@@ -153,7 +153,8 @@ TempMail app reads the result, deletes it, returns it to the admin panel
 Rules that keep this safe:
 
 - No `sudoers` entry and no change to the app's systemd sandbox; the app never gains root.
-- Allowlist only: `service-status`, `restart-service`, `backup-now`, `logs`, `doctor`, `tunnel-status`, `tunnel-install`, `tunnel-restart`, `tunnel-logout`. Anything else is rejected.
+- Allowlist only: `service-status`, `restart-service`, `backup-now`, `backup-list`, `logs`, `doctor`, `tunnel-status`, `tunnel-config`, `tunnel-install`, `tunnel-restart`, `tunnel-logout`. Anything else is rejected.
+- `backup-list` and `tunnel-config` are read-only reports for the panel: the backup directory contents, and how the named tunnel authenticates (mode, tunnel id, credentials path, ingress hostnames, token presence). Neither echoes a token value or needs a Cloudflare API token.
 - Parameters are validated (`lines` 1-500, tunnel token charset, `RESET` confirmation for logout) and passed as an argument list, never interpolated into a shell.
 - Cooldowns per mutating action (`restart-service` 10s, `tunnel-install` 30s, `tunnel-logout` 60s, `backup-now` 10s) block request loops.
 - The helper always answers: a rejected request still gets a `rejected` result, then the request file is removed, so the spool cannot wedge.
