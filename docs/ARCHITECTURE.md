@@ -39,7 +39,7 @@ No Maddy, PostgreSQL, Node.js runtime, Nginx, or public port 25 is required for 
 | `receiver/repository` | SQL operations; DB-dialect placeholders |
 | `receiver/database` | SQLite only (`modernc.org/sqlite`, pure Go, WAL); any other `DB_DRIVER` value is refused at startup |
 | `receiver/cleanup` | TTL purge and SQLite optimization |
-| `receiver/web` | `go:embed` static UI: inbox (`/app/`) plus the sidebar admin panel (`/admin`, landing panel `Dashboard`) |
+| `receiver/web` | `go:embed` static UI: inbox (`/app/`) plus the sidebar admin panel (`/admin`, landing panel `Dashboard`, `API` panel as the endpoint reference for scripts) |
 
 ## Data model
 

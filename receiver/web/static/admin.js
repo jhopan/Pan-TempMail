@@ -93,6 +93,10 @@ const ui = {
   serverWrap: document.getElementById('serverWrap'),
   svHelperNote: document.getElementById('svHelperNote'),
   versionPill: document.getElementById('versionPill'),
+  apiAuth: document.getElementById('apiAuth'),
+  apiFilters: document.getElementById('apiFilters'),
+  apiBody: document.getElementById('apiBody'),
+  apiExamples: document.getElementById('apiExamples'),
   dbRing: document.getElementById('dbRing'),
   dbRingPct: document.getElementById('dbRingPct'),
   dbPipe: document.getElementById('dbPipe'),
@@ -2302,6 +2306,141 @@ async function loadDiagnostics() {
   }
 }
 
+
+// --- panel API: referensi endpoint + contoh yang siap disalin ------------------
+
+const API_GROUPS = [
+  ['otomasi', 'Otomasi'],
+  ['inbox', 'Inbox & pesan'],
+  ['worker', 'Worker & stream'],
+  ['admin', 'Panel & admin'],
+  ['publik', 'Publik'],
+];
+
+const API_ENDPOINTS = [
+  { g: 'otomasi', m: 'POST', p: '/api/inbox', a: 'API key', n: 'Buat inbox. Field username opsional, kalau kosong dibuat dari aturan nama.' },
+  { g: 'otomasi', m: 'GET', p: '/api/inbox/:email', a: 'API key', n: 'Daftar pesan inbox, terbaru dulu.' },
+  { g: 'otomasi', m: 'GET', p: '/api/inbox/:email/wait?timeout=60', a: 'API key', n: 'Tunggu pesan berikutnya, default 30 detik, tanpa polling.' },
+  { g: 'otomasi', m: 'GET', p: '/api/message/:id', a: 'API key', n: 'Isi pesan + codes[] (OTP) dan links[] (tautan verifikasi).' },
+  { g: 'otomasi', m: 'DELETE', p: '/api/inbox/:email', a: 'API key', n: 'Hapus inbox dan isinya. Dibatasi 20/menit.' },
+  { g: 'otomasi', m: 'DELETE', p: '/api/message/:id', a: 'API key', n: 'Hapus satu pesan. Dibatasi 20/menit.' },
+  { g: 'inbox', m: 'GET', p: '/api/message/:id/attachments', a: 'JWT', n: 'Metadata lampiran sebuah pesan.' },
+  { g: 'inbox', m: 'GET', p: '/api/attachment/:id', a: 'JWT', n: 'Unduh isi lampiran.' },
+  { g: 'worker', m: 'POST', p: '/api/email/receive', a: 'API key', n: 'Dipakai Worker: kirim email mentah. Opsional X-Email-Signature kalau WORKER_SIGNING_SECRET diisi.' },
+  { g: 'worker', m: 'GET', p: '/sse/:email?token=JWT', a: 'JWT', n: 'Stream pesan baru (EventSource tidak bisa mengirim header, jadi token lewat query).' },
+  { g: 'admin', m: 'GET', p: '/api/admin/cloudflare/status', a: 'JWT admin', n: 'Profil, domain, tunnel, salinan, versi Worker.' },
+  { g: 'admin', m: 'GET', p: '/api/admin/cloudflare/domains/:domain/check', a: 'JWT admin', n: 'Pemeriksaan kesiapan domain (zone, Worker, routing, Email DNS, CNAME).' },
+  { g: 'admin', m: 'POST', p: '/api/admin/cloudflare/domains/:domain/fix', a: 'JWT admin', n: 'Rapikan: deploy Worker, aktifkan routing, buat record Email DNS, buat CNAME.' },
+  { g: 'admin', m: 'POST', p: '/api/admin/cloudflare/tunnel/cname', a: 'JWT admin', n: 'Pastikan CNAME web host tunnel ada.' },
+  { g: 'admin', m: 'GET', p: '/api/admin/system/status', a: 'JWT admin', n: 'Fakta host, aplikasi (termasuk versi), database, dan seri 24 jam.' },
+  { g: 'admin', m: 'POST', p: '/api/admin/system/action', a: 'JWT admin', n: 'Aksi helper root: logs, doctor, backup-now, restart-service, tunnel-*.' },
+  { g: 'admin', m: 'GET', p: '/api/admin/users', a: 'JWT admin', n: 'Daftar akun panel. POST/PUT/DELETE untuk kelola.' },
+  { g: 'admin', m: 'GET', p: '/api/admin/naming-rules', a: 'JWT admin', n: 'Aturan nama inbox otomatis. PUT untuk mengubah.' },
+  { g: 'publik', m: 'GET', p: '/health', a: '-', n: 'Status hidup aplikasi, dipakai systemd dan tunnel.' },
+  { g: 'publik', m: 'GET', p: '/api/config', a: '-', n: 'Hanya {domains, site_name}, tanpa rahasia.' },
+  { g: 'publik', m: 'GET', p: '/api/setup', a: '-', n: '{needs_setup} untuk memutuskan form admin pertama.' },
+  { g: 'publik', m: 'POST', p: '/api/auth/login', a: '-', n: 'Email + password admin, dibatasi 10/menit.' },
+];
+
+// apiCurl membuat contoh satu baris untuk baris tabel; contoh alur lengkap ada di bawah tabel.
+function apiCurl(item) {
+  const base = location.origin;
+  const quoted = item.p.indexOf('?') === -1 ? '"' + base + item.p + '"' : '"' + base + item.p + '"';
+  if (item.a === 'API key') {
+    const method = item.m === 'GET' ? '' : '-X ' + item.m + ' ';
+    return 'curl -s ' + method + quoted + ' -H "X-Email-API-Key: $EMAIL_API_KEY"';
+  }
+  if (item.a === 'JWT' || item.a === 'JWT admin') {
+    return 'curl -s ' + quoted + ' -H "Authorization: Bearer $JWT"';
+  }
+  return 'curl -s ' + quoted;
+}
+
+function apiRow(item) {
+  const tr = node('tr');
+  const method = node('td', 'mono');
+  method.dataset.label = 'Method';
+  method.append(node('span', 'badge' + (item.m === 'GET' ? ' on' : ''), item.m));
+  tr.append(method);
+  tr.append(cell('Path', item.p, 'mono'));
+  tr.append(cell('Auth', item.a));
+  tr.append(cell('Catatan', item.n));
+  const actions = node('td');
+  actions.dataset.label = 'Salin';
+  actions.append(copyButton(apiCurl(item), 'Salin curl'));
+  tr.append(actions);
+  return tr;
+}
+
+function apiExampleCard(title, code) {
+  const box = node('div', 'mini');
+  box.append(node('h3', null, title));
+  const pre = node('pre', 'output', code);
+  pre.tabIndex = 0;
+  box.append(pre);
+  box.append(copyButton(code, 'Salin'));
+  return box;
+}
+
+function apiExamples() {
+  const base = location.origin;
+  return [
+    ['Buat inbox dan tunggu pesan', `BASE="${base}"
+KEY="$EMAIL_API_KEY"
+
+ADDR=$(curl -s -X POST "$BASE/api/inbox" \
+  -H "X-Email-API-Key: $KEY" -H 'Content-Type: application/json' \
+  -d '{"username":"otp1"}' | python3 -c 'import json,sys; print(json.load(sys.stdin)["email"])')
+echo "alamat uji: $ADDR"
+
+# kirim email dari luar ke alamat itu, lalu tunggu sampai masuk
+curl -s "$BASE/api/inbox/$ADDR/wait?timeout=60" -H "X-Email-API-Key: $KEY"`],
+    ['Ambil kode OTP dan tautan', `curl -s "$BASE/api/message/123" -H "X-Email-API-Key: $KEY" \
+  | python3 -c 'import json,sys; d=json.load(sys.stdin); print("OTP:", d.get("codes", [])[:1], "link:", d.get("links", [])[:1])'`],
+    ['Uji terima tanpa Cloudflare', `curl -s -X POST "$BASE/api/email/receive" \
+  -H "X-Email-API-Key: $KEY" -H 'Content-Type: application/json' \
+  -d '{"to":"otp1@domain.example","from":"a@b.c","subject":"uji","raw":"From: a@b.c\r\nTo: otp1@domain.example\r\nSubject: uji\r\n\r\nkode 123456"}'`],
+    ['Login panel lalu baca status', `JWT=$(curl -s -X POST "$BASE/api/auth/login" -H 'Content-Type: application/json' \
+  -d '{"email":"admin@example.invalid","password":"PASSWORD"}' \
+  | python3 -c 'import json,sys; print(json.load(sys.stdin)["token"])')
+
+curl -s "$BASE/api/admin/system/status" -H "Authorization: Bearer $JWT"`],
+    ['Bersihkan inbox setelah selesai', `curl -s -X DELETE "$BASE/api/inbox/$ADDR" -H "X-Email-API-Key: $KEY"`],
+  ].map(function (pair) { return apiExampleCard(pair[0], pair[1]); });
+}
+
+let apiFilter = 'semua';
+
+function renderApiPanel() {
+  ui.apiAuth.replaceChildren(
+    dotCell('API key', 'header X-Email-API-Key', 'ok'),
+    dotCell('JWT', 'Authorization: Bearer <token>', 'ok'),
+    dotCell('Batas', 'API 60/menit, DELETE 20/menit, login 10/menit', ''),
+    dotCell('Signature', 'opsional X-Email-Signature (WORKER_SIGNING_SECRET)', ''),
+  );
+
+  const chips = [['semua', 'Semua']].concat(API_GROUPS);
+  ui.apiFilters.replaceChildren(...chips.map(function (pair) {
+    const chip = button(pair[1], 'chip');
+    chip.type = 'button';
+    chip.dataset.group = pair[0];
+    chip.setAttribute('aria-pressed', String(pair[0] === apiFilter));
+    chip.addEventListener('click', function () {
+      apiFilter = pair[0];
+      renderApiPanel();
+    });
+    return chip;
+  }));
+
+  const rows = API_ENDPOINTS.filter(function (item) { return apiFilter === 'semua' || item.g === apiFilter; });
+  ui.apiBody.replaceChildren(...rows.map(apiRow));
+  ui.apiExamples.replaceChildren(...apiExamples());
+}
+
+function loadApiPanel() {
+  renderApiPanel();
+}
+
 // --- boot ---
 
 function renderGate(user) {
@@ -2589,6 +2728,7 @@ const panelLoaders = {
   users: loadUsers,
   naming: loadNaming,
   diagnostics: loadDiagnostics,
+  api: loadApiPanel,
   server: loadServerPanel,
   dashboard: null,
   import: null,

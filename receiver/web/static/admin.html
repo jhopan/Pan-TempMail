@@ -156,6 +156,8 @@
     .mini h3{margin:0;font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);font-weight:600}
     .mini.wide{grid-column:span 2}
     .mini-meta{font-size:11px;color:var(--muted)}
+    .api-examples{display:grid;gap:12px;margin-top:6px}
+    .api-examples pre{margin-top:4px;max-height:210px;overflow:auto;white-space:pre}
     .ring-card{flex-direction:row;align-items:center;gap:16px}
     .ring{width:96px;height:96px;flex:0 0 auto}
     .ring circle{fill:none;stroke-width:10}
@@ -315,6 +317,8 @@
           <small>tembusan</small></button>
         <button class="nav-item" type="button" data-panel="import">Impor state
           <small>state lama</small></button>
+        <button class="nav-item" type="button" data-panel="api">API
+          <small>endpoint &amp; contoh curl</small></button>
       </nav>
 
       <div class="nav-foot">
@@ -456,6 +460,29 @@
             </details>
           </div>
           <div id="dgMsg" class="out" role="status" aria-live="polite"></div>
+        </section>
+
+        <section class="panel card" data-panel="api" aria-labelledby="hApi" hidden>
+          <div class="card-head">
+            <div>
+              <h2 id="hApi">API</h2>
+              <p class="note">Endpoint yang dipakai skrip otomasi. Contoh memakai alamat panel ini, jadi bisa langsung disalin.</p>
+            </div>
+          </div>
+          <div class="dotgrid" id="apiAuth"></div>
+          <h3>Endpoint</h3>
+          <div class="chips" id="apiFilters" role="group" aria-label="Filter grup endpoint"></div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr><th>Method</th><th>Path</th><th>Auth</th><th>Catatan</th><th>Salin</th></tr>
+              </thead>
+              <tbody id="apiBody"></tbody>
+            </table>
+          </div>
+          <h3>Contoh alur otomasi</h3>
+          <div id="apiExamples" class="api-examples"></div>
+          <div id="apiMsg" class="out" role="status" aria-live="polite"></div>
         </section>
 
         <section class="panel card" data-panel="server" aria-labelledby="hServer" id="serverSection" hidden>
@@ -813,8 +840,8 @@
     </div>
   </div>
 
-  <script src="/app/app.js?v=17"></script>
-  <script src="/app/admin.js?v=17"></script>
-  <script src="/app/admin-nav.js?v=17"></script>
+  <script src="/app/app.js?v=18"></script>
+  <script src="/app/admin.js?v=18"></script>
+  <script src="/app/admin-nav.js?v=18"></script>
 </body>
 </html>

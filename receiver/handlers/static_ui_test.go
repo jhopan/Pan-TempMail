@@ -33,13 +33,13 @@ func TestAdminPanelMarkupCarriesEveryPanel(t *testing.T) {
 	router.ServeHTTP(recorder, request)
 	body := recorder.Body.String()
 
-	for _, panel := range []string{"dashboard", "setup", "server", "diagnostics", "users", "naming", "cloudflare", "domains", "tunnel", "copies", "import"} {
+	for _, panel := range []string{"dashboard", "setup", "server", "diagnostics", "users", "naming", "cloudflare", "domains", "tunnel", "copies", "import", "api"} {
 		if !strings.Contains(body, `data-panel="`+panel+`"`) {
 			t.Errorf("panel %q tidak ada di admin.html", panel)
 		}
 	}
-	if strings.Count(body, `<section class="panel card" data-panel=`) != 11 {
-		t.Errorf("jumlah panel != 11")
+	if strings.Count(body, `<section class="panel card" data-panel=`) != 12 {
+		t.Errorf("jumlah panel != 12")
 	}
 	if strings.Count(body, `<section class="panel card" data-panel="dashboard"`) == 0 {
 		t.Errorf("panel dashboard wajib ada sebagai default")

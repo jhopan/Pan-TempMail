@@ -13,6 +13,7 @@ const NAV_PANELS = {
   users: ["Pengguna", "Akun panel dan role."],
   naming: ["Aturan nama", "Pola alamat inbox otomatis."],
   diagnostics: ["Diagnostik", "Fakta mentah satu layar."],
+  api: ["API", "Referensi endpoint dan contoh curl."],
 };
 const NAV_DEFAULT = "dashboard";
 
