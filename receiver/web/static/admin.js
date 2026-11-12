@@ -2413,10 +2413,10 @@ let apiFilter = 'semua';
 
 function renderApiPanel() {
   ui.apiAuth.replaceChildren(
-    dotCell('API key', 'header X-Email-API-Key', 'ok'),
-    dotCell('JWT', 'Authorization: Bearer <token>', 'ok'),
-    dotCell('Batas', 'API 60/menit, DELETE 20/menit, login 10/menit', ''),
-    dotCell('Signature', 'opsional X-Email-Signature (WORKER_SIGNING_SECRET)', ''),
+    dotCell('API key', 'X-Email-API-Key', 'ok'),
+    dotCell('JWT', 'Bearer <token>', 'ok'),
+    dotCell('Batas', '60/menit, DELETE 20', ''),
+    dotCell('Signature', 'opsional, HMAC', ''),
   );
 
   const chips = [['semua', 'Semua']].concat(API_GROUPS);
