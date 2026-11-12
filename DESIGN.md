@@ -1,9 +1,10 @@
 # DESIGN.md — TempMail By JhopanStore
 
-> **Status: draft, arah ditulis agent.** Pemilik produk belum menulis arahnya sendiri, jadi dokumen ini
-> saya susun dari bukti di repo (palet dan tipografi panel yang sudah jalan, cara pakai di server, dan
-> batasan "tanpa CDN"). Peringatan jujur: selera yang saya tulis cenderung ke rasa AI default dan bisa
-> terasa monoton. Anggap ini draft yang menunggu kamu rapikan, bukan arah final.
+> **Status: arah ditulis agent, dial dikonfirmasi pemilik (2026-11-12).** Pemilik produk belum menulis
+> arahnya sendiri, jadi dokumen ini saya susun dari bukti di repo (palet dan tipografi panel yang sudah
+> jalan, cara pakai di server, dan batasan "tanpa CDN"). Peringatan jujur: selera yang saya tulis
+> cenderung ke rasa AI default dan bisa terasa monoton. Dial dan aturan "Jangan" sudah disetujui; bagian
+> identitas dan karakter tetap draft yang menunggu kamu rapikan.
 
 ## Siapa yang memakainya
 
@@ -71,7 +72,7 @@ tanpa parallax. `prefers-reduced-motion` mematikan transisi.
 
 ## Dial
 
-`Dial: ENERGY 2 / RHYTHM 2 / MOTION 1`
+`Dial: ENERGY 2 / RHYTHM 2 / MOTION 1` (dikonfirmasi pemilik, 2026-11-12)
 
 - ENERGY 2: hierarki jelas dan ada aksen brand, tapi tanpa teriakan.
 - RHYTHM 2: kv, tabel, dan form tampil berbeda sesuai isinya.
