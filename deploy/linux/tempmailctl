@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# TempMail By JhopanStore control panel. Run: menutempmail
+# Pan-TempMail control panel. Run: menutempmail
 set -euo pipefail
 
 APP=/opt/tempmail
@@ -669,7 +669,7 @@ print("\t".join([
   # ── Dashboard ──
   echo
   printf "  ${C_BOLD}╔══════════════════════════════════════════════╗${C_NC}\n"
-  printf "  ${C_BOLD}║      TempMail By JhopanStore                 ║${C_NC}\n"
+  printf "  ${C_BOLD}║      Pan-TempMail                 ║${C_NC}\n"
   printf "  ${C_BOLD}║        Credit JhopanStore                    ║${C_NC}\n"
   printf "  ${C_BOLD}╚══════════════════════════════════════════════╝${C_NC}\n"
   echo
@@ -1118,7 +1118,7 @@ print("\t".join([
   local total=$((pass+fail))
   if [ $fail -eq 0 ]; then
     echo -e "  ${C_GREEN}${C_BOLD}✓ ALL CHECKS PASSED ($pass/$total)${C_NC}"
-    echo -e "  ${C_GREEN}TempMail By JhopanStore - sehat sempurna!${C_NC}"
+    echo -e "  ${C_GREEN}Pan-TempMail - sehat sempurna!${C_NC}"
   else
     echo -e "  ${C_GREEN}✓ Passed: $pass${C_NC}  ${C_RED}✗ Failed: $fail${C_NC}  ${C_DIM}(total: $total)${C_NC}"
     echo -e "  ${C_YELLOW}Perbaiki yang ✗ di atas.${C_NC}"

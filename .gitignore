@@ -1,64 +1,82 @@
-# Binaries
-receiver/receiver-final
-receiver/receiver-v2
-receiver/tempmail-linux
-receiver/tempmail-linux-arm64
-receiver/tempmail-linux-amd64
-*.exe
+# Pan-TempMail
+# Repository ignore rules. Secrets, databases, build outputs and release artifacts never belong in git.
 
-# Go
-receiver/.env
+# --- Go build output ---
+receiver/tempmail
+receiver/tempmail-*
+receiver/*.exe
+receiver/*.test
+receiver/coverage.out
+receiver/*.prof
+*.test
 
-# Database
+# --- Release artifacts (CI keeps these in the release, not in the repo) ---
+dist/
+build/
+*.tar.gz
+*.zip
+*.sha256
+pan-tempmail-*
+tempmail-linux-*
+tempmail-windows-*
+tempmail-release.tar.gz
+
+# --- Runtime data ---
+data/
 receiver/data/
+backups/
 *.db
 *.db-shm
 *.db-wal
+*.db-journal
 
-# Node.js
-frontend/node_modules/
-frontend/.next/
-frontend/out/
+# --- Secrets and host state ---
+.env
+.env.*
+!.env.example
+secrets.env
+*.pem
+*.key
+*.p12
+.wrangler/
+.cloudflared/
+cloudflare-state.json
+tempmail.env
+tempmail-admin-password
 
-# Python bytecode (helper root ditulis Python; py_compile membuat ini)
+# --- Python (root helper is Python; py_compile leaves bytecode) ---
 __pycache__/
 *.pyc
 
-# OS
+# --- Node (Worker dev only; the host never runs Node) ---
+node_modules/
+cloudflare-worker/node_modules/
+cloudflare-worker/package-lock.json
+
+# --- Logs and temp files ---
+*.log
+*.tmp
+*.swap
+
+# --- Backups of files edited by hand ---
+*.bak
+*.bak*
+*.save
+*.orig
+
+# --- OS ---
 .DS_Store
 Thumbs.db
+desktop.ini
 
-# IDE
+# --- Editors / IDEs ---
 .vscode/
 .idea/
 *.swp
 *.swo
 *~
 
-# Backup files
-*.bak
-*.bak*
-*.save
-*.orig
-
-# Logs
-*.log
-
-# Secrets
-.env
-.env.local
-.env.production
-
-# Legacy (pre-rewrite, not used)
+# --- Legacy pre-rewrite tree (kept out on purpose; not used any more) ---
 frontend/
 plan.md
 scripts/test-automation.py
-
-# Product docs (AGENTS.md, docs/*.md) are tracked on purpose; no ignore entry.
-
-# Cloudflare credentials
-.wrangler/
-.cloudflared/
-*.pem
-*.key
-*.p12

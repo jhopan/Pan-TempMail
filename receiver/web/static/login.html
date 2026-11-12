@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Masuk, TempMail By JhopanStore</title>
+  <title>Masuk, Pan-TempMail</title>
   <style>
     *{margin:0;padding:0;box-sizing:border-box}
     :root{
@@ -36,7 +36,7 @@
 <body>
   <div class="card">
     <div class="logo">⚡</div>
-    <h1>TempMail <small>By JhopanStore</small></h1>
+    <h1>Pan-TempMail</h1>
     <p class="sub" id="sub">Menyiapkan halaman</p>
     <form id="authForm" aria-busy="true" novalidate>
       <div>
@@ -54,7 +54,7 @@
       <div id="error" class="err" role="alert"></div>
       <button type="submit" class="btn" id="submitBtn" disabled>Memuat...</button>
     </form>
-    <div class="credit"><b>TempMail By JhopanStore</b>, credit JhopanStore</div>
+    <div class="credit"><b>Pan-TempMail</b>, credit JhopanStore</div>
   </div>
   <script>
     const token = localStorage.getItem('auth_token');
@@ -95,7 +95,7 @@
       subEl.textContent = isSetup
         ? 'Buat admin pertama'
         : 'Masuk untuk membuka inbox dan panel kendali';
-      document.title = (isSetup ? 'Buat admin pertama' : 'Masuk') + ', TempMail By JhopanStore';
+      document.title = (isSetup ? 'Buat admin pertama' : 'Masuk') + ', Pan-TempMail';
       confirmField.hidden = !isSetup;
       confirmInput.required = isSetup;
       confirmInput.value = '';

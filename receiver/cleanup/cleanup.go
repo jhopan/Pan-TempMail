@@ -70,8 +70,8 @@ func purgeExpired(db *sql.DB, retention time.Duration) {
 		log.Printf("cleanup: purged %d old messages (older than %s)", n, retention)
 	}
 
-	// 3. Vacuum SQLite periodically to reclaim space (only for sqlite)
-	if os.Getenv("DB_DRIVER") == "" || os.Getenv("DB_DRIVER") == "sqlite" {
+	// 3. Vacuum SQLite periodically to reclaim space
+	{
 		if _, err := db.ExecContext(ctx, `PRAGMA optimize`); err != nil {
 			log.Printf("cleanup: sqlite optimize: %v", err)
 		}

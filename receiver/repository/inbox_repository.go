@@ -23,12 +23,7 @@ func GetInboxID(db *sql.DB, email string) (int, error) {
 // CreateInbox creates a new temporary inbox.
 func CreateInbox(db *sql.DB, email string) (int, error) {
 	var id int
-	var query string
-	if dbDriverName() == "postgres" {
-		query = `INSERT INTO inboxes (email, type, expires_at) VALUES ($1, 'TEMP', NOW() + INTERVAL '1 day') RETURNING id`
-	} else {
-		query = `INSERT INTO inboxes (email, type, expires_at) VALUES (?, 'TEMP', datetime('now', '+1 day')) RETURNING id`
-	}
+	query := placeholder(`INSERT INTO inboxes (email, type, expires_at) VALUES ($1, 'TEMP', datetime('now', '+1 day')) RETURNING id`)
 	err := db.QueryRowContext(context.Background(), query, email).Scan(&id)
 	return id, err
 }
@@ -48,12 +43,7 @@ func GetInboxOwnerID(db *sql.DB, email string) (sql.NullInt64, error) {
 // CreateInboxOwned creates a temporary inbox owned by a user account.
 func CreateInboxOwned(db *sql.DB, email string, ownerID int) (int, error) {
 	var id int
-	var query string
-	if dbDriverName() == "postgres" {
-		query = `INSERT INTO inboxes (email, type, owner_id, expires_at) VALUES ($1, 'TEMP', $2, NOW() + INTERVAL '1 day') RETURNING id`
-	} else {
-		query = placeholder(`INSERT INTO inboxes (email, type, owner_id, expires_at) VALUES ($1, 'TEMP', $2, datetime('now', '+1 day')) RETURNING id`)
-	}
+	query := placeholder(`INSERT INTO inboxes (email, type, owner_id, expires_at) VALUES ($1, 'TEMP', $2, datetime('now', '+1 day')) RETURNING id`)
 	err := db.QueryRowContext(context.Background(), query, email, ownerID).Scan(&id)
 	return id, err
 }
@@ -71,12 +61,7 @@ func GetMessageInboxEmail(db *sql.DB, messageID string) (string, error) {
 
 // ExtendInboxExpiry resets the inbox expiry to 24h from now.
 func ExtendInboxExpiry(db *sql.DB, email string) error {
-	var query string
-	if dbDriverName() == "postgres" {
-		query = `UPDATE inboxes SET expires_at = NOW() + INTERVAL '1 day' WHERE email = $1`
-	} else {
-		query = `UPDATE inboxes SET expires_at = datetime('now', '+1 day') WHERE email = ?`
-	}
+	query := placeholder(`UPDATE inboxes SET expires_at = datetime('now', '+1 day') WHERE email = $1`)
 	_, err := db.ExecContext(context.Background(), query, email)
 	return err
 }

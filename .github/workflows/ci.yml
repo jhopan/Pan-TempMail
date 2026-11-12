@@ -1,0 +1,77 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: receiver/go.mod
+          cache: true
+
+      - name: gofmt
+        working-directory: receiver
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then
+            echo "gofmt reports unformatted files:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: go vet
+        working-directory: receiver
+        run: go vet ./...
+
+      - name: go test
+        working-directory: receiver
+        run: go test ./...
+
+      - name: Cross-build smoke test
+        working-directory: receiver
+        env:
+          CGO_ENABLED: '0'
+        run: |
+          for target in linux/amd64 linux/arm64 windows/amd64; do
+            os="${target%/*}"
+            arch="${target#*/}"
+            out="$RUNNER_TEMP/pan-tempmail-smoke-$os-$arch"
+            if [ "$os" = "windows" ]; then
+              out="$out.exe"
+            fi
+            GOOS="$os" GOARCH="$arch" go build -o "$out" .
+          done
+
+      - name: JavaScript syntax
+        run: |
+          node --check receiver/web/static/admin.js
+          node --check receiver/web/static/admin-nav.js
+          node --check receiver/web/static/app.js
+
+      - name: Shell script syntax
+        run: |
+          bash -n deploy/linux/install.sh
+          bash -n deploy/linux/setup.sh
+          bash -n deploy/linux/setup-auto.sh
+          bash -n deploy/linux/tempmailctl
+          bash -n deploy/linux/quick-setup.sh
+          bash -n deploy/linux/menutempmail
+
+      - name: Python syntax
+        run: |
+          python3 -m py_compile deploy/linux/tempmail-root
+          rm -rf deploy/linux/__pycache__

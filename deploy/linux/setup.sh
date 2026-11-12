@@ -20,7 +20,7 @@ die() { echo "ERROR: $*" >&2; exit 1; }
 [ "$(id -u)" = 0 ] || die "Jalankan sebagai root: sudo bash setup.sh"
 
 echo "=============================================="
-echo "  TempMail By JhopanStore - Guided Setup"
+echo "  Pan-TempMail - Guided Setup"
 echo "        Credit JhopanStore"
 echo "=============================================="
 

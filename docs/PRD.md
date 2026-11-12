@@ -1,4 +1,4 @@
-# PRD — TempMail By JhopanStore
+# PRD — Pan-TempMail
 
 ## 1. Purpose
 

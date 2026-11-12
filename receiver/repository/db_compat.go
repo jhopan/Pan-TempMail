@@ -3,25 +3,15 @@ package repository
 import (
 	"database/sql"
 	"fmt"
-	"os"
 )
 
-// dbDriverName returns "postgres" or "sqlite" based on DB_DRIVER env.
-func dbDriverName() string {
-	d := os.Getenv("DB_DRIVER")
-	if d == "postgres" {
-		return "postgres"
-	}
-	return "sqlite"
-}
-
-// placeholder converts $1, $2 to ? for SQLite, keeps $1, $2 for PostgreSQL.
+// placeholder mengubah penanda $1, $2 menjadi ?, bentuk yang dipakai SQLite.
+//
+// Semua kueri berparameter menulis $1/$2 lalu melewati fungsi ini. SQLite adalah satu-satunya
+// mesin yang didukung sekarang, jadi fungsinya satu arah; kalau suatu hari ada mesin kedua,
+// hanya berkas ini yang perlu bercabang.
 func placeholder(query string) string {
-	if dbDriverName() == "sqlite" {
-		// Replace $1, $2, $3... with ?
-		return strconvQuote(query)
-	}
-	return query
+	return strconvQuote(query)
 }
 
 // strconvQuote replaces $N placeholders with ? for SQLite.

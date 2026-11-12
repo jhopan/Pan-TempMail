@@ -1,8 +1,8 @@
-# AGENTS.md — TempMail By JhopanStore
+# AGENTS.md — Pan-TempMail
 
 ## Product
 
-TempMail By JhopanStore is a low-resource temporary email platform.
+Pan-TempMail is a low-resource temporary email platform.
 
 - One Go binary: HTTP API, embedded vanilla web UI, SMTP test/direct mode, SQLite.
 - Default production mail flow: Cloudflare Email Routing → Worker → Cloudflare Tunnel → `POST /api/email/receive`.
@@ -48,7 +48,7 @@ git push origin v1.0.0
 #   4. Creates GitHub Release with binaries attached
 
 # Download from:
-#   https://github.com/jhopan/TempMailByJhopanstore/releases
+#   https://github.com/jhopan/Pan-TempMail/releases
 ```
 
 ### Manual build (local testing only)
@@ -80,11 +80,11 @@ node --check cloudflare-worker/src/index.js
 
 ```bash
 # 1. On the target machine, download binary from GitHub Releases
-wget https://github.com/jhopan/TempMailByJhopanstore/releases/download/v1.0.0/tempmail-linux-amd64 -O /tmp/tempmail
+wget https://github.com/jhopan/Pan-TempMail/releases/latest/download/pan-tempmail-linux-amd64 -O /tmp/tempmail
 chmod +x /tmp/tempmail
 
 # 2. Clone repo (for scripts + worker)
-git clone https://github.com/jhopan/TempMailByJhopanstore.git /tmp/tempmail-repo
+git clone https://github.com/jhopan/Pan-TempMail.git /tmp/tempmail-repo
 
 # 3. Install
 cd /tmp/tempmail-repo
@@ -108,7 +108,7 @@ sudo systemctl start tempmail
 ## Code constraints
 
 - Run `gofmt` and Go tests on changed Go code.
-- DB queries with parameters must use `placeholder()` (`receiver/repository/db_compat.go`) for SQLite/PostgreSQL compatibility.
+- DB queries with parameters write `$1`, `$2` and pass the string through `placeholder()` (`receiver/repository/db_compat.go`), the single place that knows SQLite wants `?`. SQLite is the only engine.
 - API paths use `/api/*`; SSE is `/sse/:email?token=JWT`.
 - Auto-generated inbox names come from configurable naming rules (`settings` table, key `naming_rules`; admin API `GET/PUT /api/admin/naming-rules`; logic in `receiver/naming`).
 - `POST /api/inbox` accepts optional `username` field. If empty, server generates from naming rules. If provided, server uses it directly.
@@ -168,7 +168,7 @@ Port:       read from PORT in /etc/tempmail/tempmail.env (default 8081)
 
 ```bash
 # Download from GitHub Releases
-wget https://github.com/jhopan/TempMailByJhopanstore/releases/download/v1.0.0/tempmail-linux-amd64 -O /tmp/tempmail
+wget https://github.com/jhopan/Pan-TempMail/releases/latest/download/pan-tempmail-linux-amd64 -O /tmp/tempmail
 
 # Install
 sudo cp /tmp/tempmail /opt/tempmail/tempmail

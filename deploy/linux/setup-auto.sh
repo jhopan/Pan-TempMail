@@ -71,7 +71,7 @@ CF_TOKEN=${CF_TOKEN:-${CLOUDFLARE_API_TOKEN:-}}
 [ -n "$CF_TOKEN" ] || { usage; die "API token wajib diisi lewat --api-token atau env CLOUDFLARE_API_TOKEN."; }
 
 echo "=============================================="
-echo "  TempMail By JhopanStore - One Shot Setup"
+echo "  Pan-TempMail - One Shot Setup"
 echo "        Credit JhopanStore"
 echo "=============================================="
 

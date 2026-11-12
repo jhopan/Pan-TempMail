@@ -1,11 +1,14 @@
-# ⚡ TempMail By JhopanStore
+# ⚡ Pan-TempMail
 
-> **Disposable email platform — low resource, high impact.**
+[![Release](https://github.com/jhopan/Pan-TempMail/actions/workflows/release.yml/badge.svg)](https://github.com/jhopan/Pan-TempMail/actions/workflows/release.yml)
+[![CI](https://github.com/jhopan/Pan-TempMail/actions/workflows/ci.yml/badge.svg)](https://github.com/jhopan/Pan-TempMail/actions/workflows/ci.yml)
+
+> **Disposable email platform: low resource, high impact.**
 > Single Go binary. Cloudflare edge. SQLite storage. Zero external dependencies.
 
 ```text
 ╔══════════════════════════════════════════════╗
-║      TempMail By JhopanStore                 ║
+║      Pan-TempMail                 ║
 ║        Credit JhopanStore                    ║
 ╚══════════════════════════════════════════════╝
 ```
@@ -68,21 +71,21 @@ Pages cannot receive email events. Our Worker is a 72-line courier — reads ema
 On a fresh Debian/Ubuntu machine:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/jhopan/TempMailByJhopanstore/main/deploy/linux/quick-setup.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/jhopan/Pan-TempMail/main/deploy/linux/quick-setup.sh | sudo bash
 ```
 
 This will:
 1. ⬇️ Download binary from GitHub Releases
 2. 📦 Clone repo + install scripts
-3. ⚙️ Generate crypto-safe secrets
-4. ❓ Ask: domain, port, admin email, admin password
+3. ⚙️ Generate crypto-safe secrets (or let the app generate them on first run)
+4. ❓ Ask: domain, port, admin email
 5. ▶️ Start service + health check
-6. 👤 Create admin user
+6. 👤 You create the first admin in the browser
 
-Then run Cloudflare setup:
-```bash
-menutempmail → 8 (SETUP GUIDED)
-```
+Then finish in the browser: open `http://<host>:<port>/app/login.html` to create the admin, and
+`/admin` → **Setup** for the Cloudflare part (API token, tunnel, domain, Rapikan).
+
+Menu alternative: `menutempmail → 8` (SETUP GUIDED).
 
 ---
 
@@ -91,15 +94,15 @@ menutempmail → 8 (SETUP GUIDED)
 ### Step 1: Download binary
 
 ```bash
-wget https://github.com/jhopan/TempMailByJhopanstore/releases/latest/download/tempmail-linux-amd64 -O /tmp/tempmail
+wget https://github.com/jhopan/Pan-TempMail/releases/latest/download/pan-tempmail-linux-amd64 -O /tmp/tempmail
 chmod +x /tmp/tempmail
 ```
 
 ### Step 2: Clone repo
 
 ```bash
-git clone https://github.com/jhopan/TempMailByJhopanstore.git
-cd TempMailByJhopanstore
+git clone https://github.com/jhopan/Pan-TempMail.git
+cd Pan-TempMail
 ```
 
 ### Step 3: Install
@@ -121,7 +124,7 @@ PORT=8081
 DOMAINS=your-domain.com
 JWT_SECRET=          # kosongkan: dibuat otomatis ke data/secrets.env (0600)
 EMAIL_API_KEY=       # kosongkan: dibuat otomatis, dipakai juga sebagai binding Worker
-SITE_NAME=TempMail By JhopanStore
+SITE_NAME=Pan-TempMail
 GIN_MODE=release
 ```
 
@@ -246,7 +249,7 @@ Update rules at runtime via admin API → see [`docs/API.md`](docs/API.md).
 
 ```text
 ╔══════════════════════════════════════════════╗
-║      TempMail By JhopanStore                 ║
+║      Pan-TempMail                 ║
 ║        Credit JhopanStore                    ║
 ╚══════════════════════════════════════════════╝
 
@@ -428,12 +431,23 @@ git tag v1.0.0
 git push origin v1.0.0
 ```
 
-GitHub Actions builds:
-- `tempmail-linux-amd64` — Linux x86_64
-- `tempmail-linux-arm64` — Linux ARM64
-- `tempmail-windows-amd64.exe` — Windows x86_64
+GitHub Actions publishes two sets of assets per release:
 
-Download from: https://github.com/jhopan/TempMailByJhopanstore/releases
+| Target | Latest alias (stable name) | Versioned copy |
+|---|---|---|
+| Linux x86_64 | `pan-tempmail-linux-amd64` | `pan-tempmail-v1.0.0-linux-amd64` |
+| Linux ARM64 | `pan-tempmail-linux-arm64` | `pan-tempmail-v1.0.0-linux-arm64` |
+| Windows x86_64 | `pan-tempmail-windows-amd64.exe` | `pan-tempmail-v1.0.0-windows-amd64.exe` |
+
+Plus `pan-tempmail-checksums.txt`, `pan-tempmail-v1.0.0-checksums.txt`, and a source tarball
+`pan-tempmail-v1.0.0.tar.gz` (scripts, worker, docs). The stable names are republished in every
+release, so this URL always downloads the newest build:
+
+```bash
+wget https://github.com/jhopan/Pan-TempMail/releases/latest/download/pan-tempmail-linux-amd64
+```
+
+Releases: https://github.com/jhopan/Pan-TempMail/releases
 
 ---
 
@@ -479,11 +493,14 @@ go vet ./...
 
 ## 📚 Docs
 
-- [`docs/API.md`](docs/API.md) — Full API documentation with examples
-- [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) — Deployment guide
+- [`docs/PRD.md`](docs/PRD.md): product requirements
+- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md): runtime, packages, data model, API map
+- [`docs/RUNBOOK.md`](docs/RUNBOOK.md): operator commands, first admin, Cloudflare steps
+- [`docs/API.md`](docs/API.md): API reference with examples
+- [`docs/TDD.md`](docs/TDD.md) and [`docs/SDD.md`](docs/SDD.md): testing and design decisions
 
 ---
 
 ## 📄 License
 
-MIT. Credit: **TempMail By JhopanStore**.
+MIT. Credit: **Pan-TempMail** by JhopanStore.

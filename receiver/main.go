@@ -39,7 +39,7 @@ func main() {
 	// Startup banner
 	siteName := os.Getenv("SITE_NAME")
 	if siteName == "" {
-		siteName = "TempMail"
+		siteName = "Pan-TempMail"
 	}
 	port := os.Getenv("PORT")
 	if port == "" {
@@ -48,7 +48,7 @@ func main() {
 	banner := "\n==============================================\n  " + siteName + "\n        Credit JhopanStore\n==============================================\n"
 	log.Println(banner)
 
-	// Connect to database (SQLite by default, PostgreSQL if DB_DRIVER=postgres)
+	// Connect to the SQLite database (one file, WAL)
 	if err := database.Connect(); err != nil {
 		log.Fatalf("database: %v", err)
 	}

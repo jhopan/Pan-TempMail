@@ -1,5 +1,5 @@
 # ==========================================
-# TempMail Ultra-Light — Multi-stage Dockerfile
+# Pan-TempMail - Multi-stage Dockerfile
 # Final image: ~20MB (Alpine + single Go binary, no CGO)
 # ==========================================
 

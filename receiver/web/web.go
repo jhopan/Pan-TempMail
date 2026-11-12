@@ -49,7 +49,7 @@ func ConfigHandler(c *gin.Context) {
 
 	siteName := os.Getenv("SITE_NAME")
 	if siteName == "" {
-		siteName = "TempMail"
+		siteName = "Pan-TempMail"
 	}
 
 	c.JSON(http.StatusOK, gin.H{

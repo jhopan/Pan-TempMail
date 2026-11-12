@@ -1,4 +1,4 @@
-# DESIGN.md — TempMail By JhopanStore
+# DESIGN.md — Pan-TempMail
 
 > **Status: arah ditulis agent, dial dikonfirmasi pemilik (2026-11-12).** Pemilik produk belum menulis
 > arahnya sendiri, jadi dokumen ini saya susun dari bukti di repo (palet dan tipografi panel yang sudah

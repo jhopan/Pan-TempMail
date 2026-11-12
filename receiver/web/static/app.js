@@ -1,4 +1,4 @@
-// TempMail Frontend, vanilla JS, no Node.js runtime needed
+// Pan-TempMail frontend, vanilla JS, no Node.js runtime needed
 // Embedded directly in Go binary via go:embed
 
 const API = {

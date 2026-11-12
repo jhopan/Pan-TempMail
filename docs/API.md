@@ -1,4 +1,4 @@
-# TempMail By JhopanStore — API Documentation
+# Pan-TempMail — API Documentation
 
 Complete guide for using TempMail automation API.
 
@@ -314,7 +314,7 @@ GET /api/config
 ```json
 {
   "domains": ["your-domain.com"],
-  "site_name": "TempMail By JhopanStore"
+  "site_name": "Pan-TempMail"
 }
 ```
 

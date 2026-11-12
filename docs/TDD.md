@@ -1,4 +1,4 @@
-# TDD — TempMail By JhopanStore
+# TDD — Pan-TempMail
 
 ## Rule
 

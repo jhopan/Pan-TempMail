@@ -58,7 +58,7 @@ function showPanel(name, options) {
   const meta = NAV_PANELS[target] || [target, ""];
   viewTitle.textContent = meta[0];
   viewSub.textContent = meta[1];
-  document.title = meta[0] + " - Panel TempMail By JhopanStore";
+  document.title = meta[0] + " - Panel Pan-TempMail";
   document.dispatchEvent(new CustomEvent("panel:show", { detail: { panel: target } }));
   if (!options || !options.silent) {
     const heading = document.querySelector('#panel .panel[data-panel="' + target + '"] h2');

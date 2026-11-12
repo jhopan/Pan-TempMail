@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# TempMail By JhopanStore — Quick Setup (one-liner)
-# Usage: curl -fsSL https://raw.githubusercontent.com/jhopan/TempMailByJhopanstore/main/deploy/linux/quick-setup.sh | sudo bash
+# Pan-TempMail — Quick Setup (one-liner)
+# Usage: curl -fsSL https://raw.githubusercontent.com/jhopan/Pan-TempMail/main/deploy/linux/quick-setup.sh | sudo bash
 #
 # What this does:
 #   1. Download binary from GitHub Releases
@@ -20,9 +20,9 @@ warn()  { echo -e "${YELLOW}⚠${NC} $1"; }
 err()   { echo -e "${RED}✗${NC} $1"; }
 header() { echo -e "\n${BOLD}=== $1 ===${NC}"; }
 
-REPO_URL="https://github.com/jhopan/TempMailByJhopanstore"
-RAW_URL="https://raw.githubusercontent.com/jhopan/TempMailByJhopanstore/main"
-RELEASE_URL="https://github.com/jhopan/TempMailByJhopanstore/releases/latest/download"
+REPO_URL="https://github.com/jhopan/Pan-TempMail"
+RAW_URL="https://raw.githubusercontent.com/jhopan/Pan-TempMail/main"
+RELEASE_URL="https://github.com/jhopan/Pan-TempMail/releases/latest/download"
 INSTALL_DIR="/opt/tempmail"
 CONFIG_DIR="/etc/tempmail"
 CLONE_DIR="/tmp/tempmail-repo"
@@ -30,7 +30,7 @@ CLONE_DIR="/tmp/tempmail-repo"
 # Must be root
 [ "$(id -u)" -eq 0 ] || { err "Run as root: sudo bash $0"; exit 1; }
 
-header "TempMail By JhopanStore — Quick Setup"
+header "Pan-TempMail — Quick Setup"
 echo -e "      ${BOLD}Credit JhopanStore${NC}"
 echo ""
 
@@ -115,7 +115,7 @@ PORT=$PORT
 SMTP_HOST=127.0.0.1
 SMTP_PORT=2525
 DOMAINS=$DOMAIN
-SITE_NAME=TempMail By JhopanStore
+SITE_NAME=Pan-TempMail
 CORS_ORIGINS=
 CLEANUP_INTERVAL=1h
 MESSAGE_RETENTION=24h
@@ -173,7 +173,7 @@ fi
 # Done
 echo ""
 echo -e "${GREEN}${BOLD}==============================================${NC}"
-echo -e "${GREEN}${BOLD}  TempMail By JhopanStore — Setup Complete!  ${NC}"
+echo -e "${GREEN}${BOLD}  Pan-TempMail — Setup Complete!  ${NC}"
 echo -e "${GREEN}${BOLD}        Credit JhopanStore                   ${NC}"
 echo -e "${GREEN}${BOLD}==============================================${NC}"
 echo ""

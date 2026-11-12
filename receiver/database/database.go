@@ -6,10 +6,10 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
-	_ "github.com/lib/pq"  // PostgreSQL, hanya dipakai saat DB_DRIVER=postgres
 	_ "modernc.org/sqlite" // Pure-Go SQLite, no CGO needed
 )
 
@@ -18,40 +18,26 @@ var (
 	once sync.Once
 )
 
-// Connect initializes the SQLite database.
-// If DB_DRIVER=postgres, it connects to PostgreSQL instead (for scaling up).
+// Connect membuka database SQLite. Satu node, satu berkas, WAL: cukup untuk temp mail
+// pribadi, dan tidak ada dialek kedua yang harus dirawat.
+//
+// DB_DRIVER hanya diterima sebagai "sqlite" (atau kosong). Nilai lain ditolak dengan pesan
+// jelas supaya deployment lama yang masih menyetel postgres tidak diam-diam salah koneksi.
 func Connect() error {
-	driver := os.Getenv("DB_DRIVER")
-	if driver == "" {
-		driver = "sqlite"
+	if driver := strings.TrimSpace(os.Getenv("DB_DRIVER")); driver != "" && driver != "sqlite" {
+		return fmt.Errorf("DB_DRIVER=%s tidak didukung lagi: aplikasi ini hanya memakai SQLite, hapus DB_DRIVER dari env", driver)
 	}
 
-	var dsn string
-	var dbDriver string
-
-	switch driver {
-	case "postgres":
-		dbDriver = "postgres"
-		dsn = fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=disable",
-			os.Getenv("DB_HOST"),
-			os.Getenv("DB_PORT"),
-			os.Getenv("DB_USER"),
-			os.Getenv("DB_PASSWORD"),
-			os.Getenv("DB_NAME"),
-		)
-	default:
-		dbDriver = "sqlite"
-		dbPath := os.Getenv("DB_PATH")
-		if dbPath == "" {
-			// Default: data/tempmail.db relative to working dir
-			dbPath = "data/tempmail.db"
-		}
-		// Ensure directory exists
-		if err := os.MkdirAll(filepath.Dir(dbPath), 0755); err != nil {
-			return fmt.Errorf("create db directory: %w", err)
-		}
-		dsn = dbPath + "?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=synchronous(NORMAL)&_pragma=foreign_keys(on)"
+	dbDriver := "sqlite"
+	dbPath := os.Getenv("DB_PATH")
+	if dbPath == "" {
+		// Default: data/tempmail.db relatif terhadap working dir
+		dbPath = "data/tempmail.db"
 	}
+	if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
+		return fmt.Errorf("create db directory: %w", err)
+	}
+	dsn := dbPath + "?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=synchronous(NORMAL)&_pragma=foreign_keys(on)"
 
 	db, err := sql.Open(dbDriver, dsn)
 	if err != nil {
