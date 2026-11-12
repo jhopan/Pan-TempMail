@@ -24,6 +24,7 @@ SERVICE="tempmail.service"
 DEFAULT_PORT=8080
 
 PORT=""
+PORT_ARG=""
 VERSION="latest"
 FORCE_OS=""
 FORCE_ARCH=""
@@ -66,7 +67,7 @@ die() { printf 'error: %s\n' "$*" >&2; exit 1; }
 
 while [ $# -gt 0 ]; do
   case "$1" in
-    --port) PORT=${2:-}; shift 2 ;;
+    --port) PORT=${2:-}; PORT_ARG=1; shift 2 ;;
     --version) VERSION=${2:-}; shift 2 ;;
     --os) FORCE_OS=${2:-}; shift 2 ;;
     --arch) FORCE_ARCH=${2:-}; shift 2 ;;
@@ -254,6 +255,15 @@ is_root() { [ "$(id -u 2>/dev/null || echo 1)" = "0" ]; }
 has_systemd() {
   [ -d /run/systemd/system ] && command -v systemctl >/dev/null 2>&1
 }
+
+# Mode update: port yang sudah dipakai env lebih penting daripada default/pertanyaan.
+if [ "$UPDATE" = "1" ] && [ -z "$PORT_ARG" ] && [ -r "${ENV_DIR}/tempmail.env" ]; then
+  EXISTING_PORT=$(awk -F= '/^PORT=/{print $2; exit}' "${ENV_DIR}/tempmail.env" | tr -d '\r')
+  if valid_port "$EXISTING_PORT"; then
+    PORT=$EXISTING_PORT
+    log "port dari env yang ada: ${PORT}"
+  fi
+fi
 
 PORT=$(printf '%s' "$PORT")
 ask_port
