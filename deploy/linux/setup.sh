@@ -249,6 +249,8 @@ else
 API token butuh permission:
   - Account Settings:Read    (verifikasi Account ID)
   - Zone:Read                (cari zone domain)
+  - Zone Settings:Edit       (aktifkan Email Routing + baca status DNS routing)
+  - DNS:Edit                 (buat CNAME tunnel + record Email Routing)
   - Email Routing Rules:Edit (aktifkan routing + catch-all)
   - Workers Scripts:Edit     (deploy Worker)
   - Cloudflare Tunnel:Edit   (buat tunnel + ambil token konektor)

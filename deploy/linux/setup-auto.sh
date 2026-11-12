@@ -29,8 +29,9 @@ Flag:
   --web-host    host panel, default tempmail.<domain>
   --account-id  Cloudflare Account ID
   --api-token   Cloudflare API token, permission:
-                Account Settings:Read, Zone:Read, Email Routing Rules:Edit,
-                Workers Scripts:Edit, dan Cloudflare Tunnel:Edit bila perlu tunnel baru
+                Account Settings:Read, Zone:Read, Zone Settings:Edit, DNS:Edit,
+                Email Routing Rules:Edit, Workers Scripts:Edit,
+                dan Cloudflare Tunnel:Edit bila perlu tunnel baru
 
 Bisa juga lewat env: DOMAIN, WEB_HOST, CLOUDFLARE_ACCOUNT_ID, CLOUDFLARE_API_TOKEN
 TXT

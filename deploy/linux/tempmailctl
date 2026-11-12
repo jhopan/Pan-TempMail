@@ -750,8 +750,9 @@ guided_setup() {
   echo
   echo "Langkah terakhir: isi API token profil, kalau tidak panel hanya bisa membaca sebagian."
   echo "  Di menu ini: pilihan 3. Di browser: $(panel_url) -> Akun Cloudflare."
-  echo "  Token dibuat di https://dash.cloudflare.com/profile/api-tokens dengan izin:"
-  echo "  Zone:Read, DNS:Edit, Email Routing Rules:Edit, Workers Scripts:Edit, Cloudflare Tunnel:Edit."
+  echo "  Token dibuat di https://dash.cloudflare.com/profile/api-tokens dengan izin wajib:"
+  echo "  Zone:Read, Zone Settings:Edit, DNS:Edit, Email Routing Rules:Edit, Workers Scripts:Edit."
+  echo "  Opsional: Cloudflare Tunnel:Edit (kelola tunnel dari panel), Account Settings:Read."
 }
 
 # panel_url: alamat panel admin dari web host tunnel, atau alamat lokal sebagai cadangan.
@@ -792,8 +793,9 @@ for p in items:
 '
   read -r -p "ID profil yang diisi tokennya (kosong = profil aktif): " selected
   [ -n "$selected" ] || selected=$(choose_profile) || return 0
-  echo "Buat token di https://dash.cloudflare.com/profile/api-tokens dengan izin:"
-  echo "  Zone:Read, DNS:Edit, Email Routing Rules:Edit, Workers Scripts:Edit, Cloudflare Tunnel:Edit"
+  echo "Buat token di https://dash.cloudflare.com/profile/api-tokens dengan izin wajib:"
+  echo "  Zone:Read, Zone Settings:Edit, DNS:Edit, Email Routing Rules:Edit, Workers Scripts:Edit"
+  echo "  Opsional: Cloudflare Tunnel:Edit (kelola tunnel), Account Settings:Read."
   read -r -s -p "Tempel Cloudflare API token: " token; echo
   [ -n "$token" ] || { echo "Token kosong, dibatalkan."; return 0; }
   payload=$(CF_TOKEN="$token" tm_json token CF_TOKEN)

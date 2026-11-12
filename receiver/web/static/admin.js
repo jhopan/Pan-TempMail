@@ -354,7 +354,7 @@ function tokenCell(profile) {
       await cf('/profiles/' + encodeURIComponent(profile.id), { method: 'PUT', body: JSON.stringify({ token: value }) });
       await loadProfiles();
       message(ui.profilesMsg, 'ok', 'API token profil ' + profile.id + ' disimpan lewat API token, tanpa OAuth',
-        'izin yang dibutuhkan: Zone:Read, Email Routing Rules:Edit, Workers Scripts:Edit');
+        'izin wajib: Zone:Read, Zone Settings:Edit, DNS:Edit, Email Routing Rules:Edit, Workers Scripts:Edit');
     });
   });
   td.append(input, save);

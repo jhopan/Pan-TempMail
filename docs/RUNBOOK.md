@@ -91,7 +91,7 @@ Two equivalent paths; both write the same records.
 
 Web admin panel (`/admin`, not linked from the inbox UI, admin account required):
 
-1. Create an API token per account (Zone:Read, Email Routing Rules:Edit, Workers Scripts:Edit).
+1. Create an API token per account (Zone:Read, Zone Settings:Edit, DNS:Edit, Email Routing Rules:Edit, Workers Scripts:Edit; add Cloudflare Tunnel:Edit to manage or read tunnels from the panel, and Account Settings:Read for the setup scripts' account check).
 2. Profiles, add the account with its Account ID and token, then activate it.
 3. Domains, add the domain; the zone must be `active` in that account.
 4. Profiles, deploy the Worker for that profile.

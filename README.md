@@ -363,7 +363,8 @@ Panel flow (`/app/admin.html`):
 
 ```text
 1. Create an API token in the Cloudflare account that owns domain B.
-   Permissions: Zone:Read, Email Routing Rules:Edit, Workers Scripts:Edit
+   Required: Zone:Read, Zone Settings:Edit, DNS:Edit, Email Routing Rules:Edit, Workers Scripts:Edit
+   Optional: Cloudflare Tunnel:Edit (manage/read tunnels), Account Settings:Read
    Zone resources: All zones in that account.
 2. Admin panel -> Cloudflare profiles -> add profile (id cf-b, Account ID B, the token), tick Activate.
 3. Admin panel -> Domains -> add domain B. The zone is looked up with profile B's token.
