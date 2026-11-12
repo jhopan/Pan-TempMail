@@ -320,6 +320,34 @@ if [ "$DRY_RUN" = "1" ]; then
   exit 0
 fi
 
+# Port yang sudah dipakai proses lain membuat systemd gagal bind dan service restart
+# tanpa henti; lebih baik berhenti di sini dengan pesan yang menyebut pemiliknya.
+port_in_use() {
+  local p=$1
+  if command -v ss >/dev/null 2>&1; then
+    ss -ltn 2>/dev/null | awk -v P=":"$p"$" '$4 ~ P {found=1} END{exit !found}'
+  elif command -v netstat >/dev/null 2>&1; then
+    netstat -ltn 2>/dev/null | awk -v P=":"$p"$" '$4 ~ P {found=1} END{exit !found}'
+  else
+    return 1
+  fi
+}
+
+port_owner() {
+  if command -v ss >/dev/null 2>&1; then
+    ss -ltnp 2>/dev/null | awk -v P=":"$1"$" '$4 ~ P {print $NF}' | head -n1
+  fi
+}
+
+# Pada update, port memang sedang dipegang service kita sendiri, jadi lewati pemeriksaan.
+if [ "$MODE" = "server" ] && [ "$UPDATE" = "0" ] && port_in_use "$PORT"; then
+  owner=$(port_owner "$PORT")
+  case "$owner" in
+    *tempmail*) die "port ${PORT} sedang dipakai instance TempMail yang berjalan (${owner}); pakai --update, atau hentikan service dulu" ;;
+    *) die "port ${PORT} sudah dipakai proses lain: ${owner:-tidak diketahui}. Pilih port lain dengan --port." ;;
+  esac
+fi
+
 TMP_DIR=$(mktemp -d "${TMPDIR:-/tmp}/pan-tempmail.XXXXXX")
 cleanup() { rm -rf "$TMP_DIR"; }
 trap cleanup EXIT
