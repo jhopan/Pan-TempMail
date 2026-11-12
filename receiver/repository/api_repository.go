@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
 	"receiver/database"
@@ -183,6 +184,87 @@ func WaitForMessage(db *sql.DB, email string, timeout time.Duration, matchSubjec
 		time.Sleep(pollInterval)
 	}
 	return nil, fmt.Errorf("timeout waiting for message")
+}
+
+// MessageSeries counts messages per hour for the last `hours` hours, oldest bucket first.
+// The bool reports whether the row cap was hit, so callers can mark the series as a lower bound.
+//
+// Bucket terakhir adalah jam yang memuat `now`, jadi grafik 24 bar selalu berakhir di jam ini.
+// received_at dibaca sebagai string dan dibucket di Go, sehingga tidak ada fungsi tanggal khusus
+// SQLite atau Postgres di query.
+func MessageSeries(db *sql.DB, now time.Time, hours int, cap int) ([]int, bool, error) {
+	if hours <= 0 {
+		return []int{}, false, nil
+	}
+	series := make([]int, hours)
+	if db == nil {
+		return series, false, nil
+	}
+
+	now = now.UTC()
+	lastStart := now.Truncate(time.Hour)
+	// windowStart adalah awal bucket 0; baris lebih tua dari ini diabaikan.
+	windowStart := lastStart.Add(-time.Duration(hours-1) * time.Hour)
+	// SQLite menyimpan received_at sebagai CURRENT_TIMESTAMP (UTC, "2006-01-02 15:04:05"):
+	// cutoff dengan format yang sama membuat perbandingan string tetap benar.
+	cutoff := now.Add(-time.Duration(hours) * time.Hour).Format("2006-01-02 15:04:05")
+
+	// Urut dari yang terbaru: kalau cap tercapai, yang dipotong adalah jam paling lama,
+	// bukan jam terakhir yang justru paling penting di grafik.
+	query := `SELECT received_at FROM messages WHERE received_at >= $1 ORDER BY received_at DESC`
+	if cap > 0 {
+		query += fmt.Sprintf(" LIMIT %d", cap+1)
+	}
+	query = placeholder(query)
+
+	rows, err := db.QueryContext(context.Background(), query, cutoff)
+	if err != nil {
+		return series, false, fmt.Errorf("message series: %w", err)
+	}
+	defer rows.Close()
+
+	fetched := 0
+	for rows.Next() {
+		fetched++
+		var raw string
+		if err := rows.Scan(&raw); err != nil {
+			continue // satu baris rusak tidak boleh menggagalkan seluruh seri
+		}
+		hour, ok := parseMessageHour(raw)
+		if !ok {
+			continue // timestamp aneh diabaikan, bukan dihitung di bucket mana pun
+		}
+		index := int(hour.Sub(windowStart) / time.Hour)
+		if index < 0 {
+			continue // lebih tua dari jendela
+		}
+		if index >= hours {
+			index = hours - 1 // clock skew: baris masa depan masuk bucket terakhir
+		}
+		series[index]++
+	}
+
+	if err := rows.Err(); err != nil {
+		return series, false, fmt.Errorf("message series rows: %w", err)
+	}
+	// fetched menghitung baris yang dikembalikan query (termasuk yang diabaikan): kalau lebih
+	// dari cap, seri ini hanya batas bawah.
+	return series, cap > 0 && fetched > cap, nil
+}
+
+// parseMessageHour reads the hour a stored timestamp belongs to. Hanya 13 karakter pertama
+// dipakai ("2006-01-02 15"), dan "T" dinormalkan jadi spasi supaya bentuk ISO juga terbaca.
+func parseMessageHour(raw string) (time.Time, bool) {
+	s := strings.TrimSpace(raw)
+	if len(s) < 13 {
+		return time.Time{}, false
+	}
+	s = strings.Replace(s[:13], "T", " ", 1)
+	hour, err := time.Parse("2006-01-02 15", s)
+	if err != nil {
+		return time.Time{}, false
+	}
+	return hour.UTC(), true
 }
 
 // arrayToJSON converts a string slice to a JSON array string for DB storage.

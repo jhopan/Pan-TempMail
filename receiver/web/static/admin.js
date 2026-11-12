@@ -86,16 +86,16 @@ const ui = {
   svReloadBtn: document.getElementById('svReloadBtn'),
   serverState: document.getElementById('serverState'),
   serverWrap: document.getElementById('serverWrap'),
-  svHelper: document.getElementById('svHelper'),
-  svApp: document.getElementById('svApp'),
-  svDb: document.getElementById('svDb'),
-  svCf: document.getElementById('svCf'),
   svHelperNote: document.getElementById('svHelperNote'),
-  dbStrip: document.getElementById('dbStrip'),
+  dbRing: document.getElementById('dbRing'),
+  dbRingPct: document.getElementById('dbRingPct'),
+  dbPipe: document.getElementById('dbPipe'),
+  dbSpark: document.getElementById('dbSpark'),
+  dbSparkMeta: document.getElementById('dbSparkMeta'),
   dbTiles: document.getElementById('dbTiles'),
+  dbGrid: document.getElementById('dbGrid'),
   dbAlerts: document.getElementById('dbAlerts'),
   dbAlertsWrap: document.getElementById('dbAlertsWrap'),
-  dbDetails: document.getElementById('dbDetails'),
   svServiceBtn: document.getElementById('svServiceBtn'),
   svLogLines: document.getElementById('svLogLines'),
   svLogBtn: document.getElementById('svLogBtn'),
@@ -1220,37 +1220,9 @@ function fillKv(dl, rows) {
 
 function renderSystem() {
   const s = systemSlot();
-  const out = state.system || {};
-  const helper = out.helper || {};
-  const app = out.app || {};
-  const db = out.db || {};
-  const cloudflare = out.cloudflare || {};
+  // Angka mentah helper, aplikasi, database, dan Cloudflare pindah ke panel Diagnostik;
+  // dashboard hanya menampilkan bentuk visualnya agar tidak ada fakta yang diulang.
   s.ok();
-  fillKv(ui.svHelper, [
-    ['Terpasang', helper.installed ? 'terpasang' : 'belum terpasang'],
-    ['Direktori', helper.dir || '-'],
-    ['Request tertunda', String(countOf(helper.pending))],
-  ]);
-  fillKv(ui.svApp, [
-    ['Uptime', formatUptime(app.uptime_seconds)],
-    ['RAM', formatMb(app.rss_bytes)],
-    ['Versi Go', app.go_version || '-'],
-    ['Site name', app.site_name || '-'],
-    ['Port', app.port || '-'],
-  ]);
-  fillKv(ui.svDb, [
-    ['Ukuran file', formatBytes(db.bytes) + ' (' + countOf(db.bytes) + ' byte)'],
-    ['Path', db.path || '-'],
-    ['Inbox', String(countOf(db.inboxes))],
-    ['Pesan', String(countOf(db.messages))],
-    ['Lampiran', String(countOf(db.attachments))],
-  ]);
-  fillKv(ui.svCf, [
-    ['Profil', String(countOf(cloudflare.profiles))],
-    ['Domain', String(countOf(cloudflare.domains))],
-    ['Profil aktif', cloudflare.active_profile || '-'],
-    ['Worker', cloudflare.worker_name || '-'],
-  ]);
 }
 
 function tile(label, value, sub, tone) {
@@ -1260,11 +1232,130 @@ function tile(label, value, sub, tone) {
   return box;
 }
 
-// Pil status untuk strip dashboard: label pendek, nilai, dan warna titik sebagai penanda.
-function pill(label, value, tone) {
-  const span = node('span', 'pill' + (tone ? ' ' + tone : ''));
-  span.append(node('i'), node('span', null, label + ' '), node('b', null, value));
-  return span;
+// --- papan dashboard: cincin kesiapan, alur email, grafik aktivitas, kotak aspek ---
+
+const RING_CIRCUMFERENCE = 326.7;
+
+// setRing menggambar busur kesiapan 0-100 dan memberi warna sesuai level.
+function setRing(pct, level) {
+  if (!ui.dbRing) return;
+  const value = ui.dbRing.querySelector('.value');
+  if (value) {
+    value.setAttribute('stroke-dashoffset', String(RING_CIRCUMFERENCE * (1 - Math.max(0, Math.min(100, pct)) / 100)));
+  }
+  ui.dbRing.setAttribute('class', 'ring' + (level && level !== 'ok' ? ' ' + level : ''));
+}
+
+function pipeNode(label, note, level) {
+  const box = node('div', 'pipe-node' + (level ? ' ' + level : ''));
+  box.append(node('i'), node('span', null, label));
+  if (note) box.append(node('small', null, note));
+  box.title = label + ': ' + (note || '-');
+  return box;
+}
+
+function dotCell(label, note, level) {
+  const box = node('div', level || '');
+  box.append(node('i'), node('span', null, label));
+  if (note) box.append(node('small', null, note));
+  return box;
+}
+
+function statTile(label, value, sub, bar) {
+  const box = tile(label, value, sub);
+  if (bar) {
+    const track = node('div', 'bar' + (bar.tone && bar.tone !== 'ok' ? ' ' + bar.tone : ''));
+    const fill = node('span');
+    fill.style.width = Math.max(2, Math.min(100, bar.pct)) + '%';
+    track.append(fill);
+    box.append(track);
+  }
+  return box;
+}
+
+// Alur email dari pengirim sampai inbox, tiap simpul punya warna status.
+function dashPipe(sys, cf) {
+  const db = (sys && sys.db) || {};
+  const helper = (sys && sys.helper) || {};
+  const profiles = (cf && cf.profiles) || [];
+  const domains = (cf && cf.domains) || [];
+  const tunnel = (cf && cf.tunnel) || {};
+  const routed = domains.filter(function (d) { return d.routing; }).length;
+  const workers = profiles.filter(function (p) { return p.worker_deployed; }).length;
+  const messages = countOf(db.messages);
+  const tunnelOK = ['healthy', 'up', 'connected', 'active']
+    .indexOf(String(tunnel.status || '').toLowerCase()) !== -1;
+  return [
+    ['Pengirim', 'di luar', 'ok'],
+    ['CF Routing', domains.length ? routed + '/' + domains.length : 'tanpa domain',
+      domains.length ? (routed === domains.length ? 'ok' : 'warn') : 'bad'],
+    ['Worker', profiles.length ? workers + '/' + profiles.length : 'tanpa profil',
+      profiles.length ? (workers === profiles.length ? 'ok' : 'warn') : 'bad'],
+    ['Tunnel', tunnel.web_host ? (tunnelOK ? 'siap' : String(tunnel.status || 'belum')) : 'web host kosong',
+      tunnelOK && tunnel.web_host ? 'ok' : 'warn'],
+    ['Server', helper.installed ? 'helper siap' : 'tanpa helper', helper.installed ? 'ok' : 'warn'],
+    ['Inbox', messages ? messages + ' pesan' : 'belum ada email', messages ? 'ok' : 'warn'],
+  ];
+}
+
+// Aspek yang diperiksa: satu kotak per komponen, hijau berarti siap.
+function dashAspects(sys, cf) {
+  const db = (sys && sys.db) || {};
+  const app = (sys && sys.app) || {};
+  const helper = (sys && sys.helper) || {};
+  const profiles = (cf && cf.profiles) || [];
+  const domains = (cf && cf.domains) || [];
+  const tunnel = (cf && cf.tunnel) || {};
+  const copies = (cf && cf.copies) || [];
+  const withToken = profiles.filter(function (p) { return p.has_token; }).length;
+  const withWorker = profiles.filter(function (p) { return p.worker_deployed; }).length;
+  const routed = domains.filter(function (d) { return d.routing; }).length;
+  const tunnelOK = ['healthy', 'up', 'connected', 'active']
+    .indexOf(String(tunnel.status || '').toLowerCase()) !== -1;
+  return [
+    ['Helper', helper.installed ? 'siap' : 'belum', helper.installed ? 'ok' : 'bad'],
+    ['Aplikasi', formatUptime(app.uptime_seconds), 'ok'],
+    ['Database', formatBytes(db.bytes), countOf(db.bytes) ? 'ok' : 'warn'],
+    ['Token', withToken + '/' + profiles.length,
+      withoutTokenLevel(withToken, profiles.length)],
+    ['Worker', withWorker + '/' + profiles.length,
+      profiles.length ? (withWorker === profiles.length ? 'ok' : 'warn') : 'bad'],
+    ['Routing', routed + '/' + domains.length,
+      domains.length ? (routed === domains.length ? 'ok' : 'warn') : 'warn'],
+    ['Tunnel', tunnelOK ? 'siap' : 'belum', tunnelOK ? 'ok' : 'warn'],
+    ['Salinan', copies.length ? copies.length + ' alamat' : 'off', 'ok'],
+  ];
+}
+
+function withoutTokenLevel(withToken, total) {
+  if (!total) return 'bad';
+  return withToken === total ? 'ok' : 'warn';
+}
+
+// Grafik batang 24 jam dari db.series (jam UTC, bucket terakhir = jam sekarang).
+function renderSpark(db) {
+  const series = Array.isArray(db.series) ? db.series : [];
+  const hours = series.length;
+  const peak = series.reduce(function (max, value) { return Math.max(max, countOf(value)); }, 0);
+  const now = Date.now();
+  const bars = [];
+  for (let i = 0; i < hours; i++) {
+    const count = countOf(series[i]);
+    const bar = node('i', count ? '' : 'zero');
+    bar.style.height = Math.max(3, Math.round((count / Math.max(1, peak)) * 100)) + '%';
+    const hour = new Date(now - (hours - 1 - i) * 3600000).getUTCHours();
+    bar.title = (hour < 10 ? '0' + hour : String(hour)) + ':00 UTC · ' + count + ' pesan';
+    bars.push(bar);
+  }
+  ui.dbSpark.replaceChildren(...bars);
+  if (!hours) {
+    ui.dbSparkMeta.textContent = 'Menunggu data dari server.';
+    return 0;
+  }
+  const total = series.reduce(function (sum, value) { return sum + countOf(value); }, 0);
+  ui.dbSparkMeta.textContent = total + ' pesan / 24 jam (UTC) · puncak ' + peak + '/jam' +
+    (db.series_capped ? ' · ≥ (baris dibatasi)' : '');
+  return total;
 }
 
 function panelLink(href, label) {
@@ -1275,38 +1366,47 @@ function panelLink(href, label) {
   return link;
 }
 
-// Ringkasan angka dan hal yang butuh tindakan; sumbernya dua endpoint status yang sudah ada.
+// Papan visual: cincin kesiapan, alur email, grafik 24 jam, tiga angka, kotak aspek,
+// lalu daftar tindakan. Sumbernya dua endpoint status yang sudah ada.
 function renderDashboard(sys, cf, cfError) {
-  const helper = (sys && sys.helper) || {};
-  const app = (sys && sys.app) || {};
   const db = (sys && sys.db) || {};
+  const app = (sys && sys.app) || {};
   const profiles = (cf && cf.profiles) || [];
   const domains = (cf && cf.domains) || [];
   const tunnel = (cf && cf.tunnel) || {};
   const copies = (cf && cf.copies) || [];
-  const routed = domains.filter(function (d) { return d.routing; });
+  const helper = (sys && sys.helper) || {};
   const withoutToken = profiles.filter(function (p) { return !p.has_token; });
   const withWorker = profiles.filter(function (p) { return p.worker_deployed; });
-  const withToken = profiles.length - withoutToken.length;
-  const tunnelText = tunnel.status && tunnel.status !== 'unknown' ? tunnel.status : 'belum terbaca';
 
-  ui.dbStrip.replaceChildren(
-    pill('helper', helper.installed ? 'siap' : 'belum', helper.installed ? 'ok' : 'bad'),
-    pill('profil', profiles.length ? String(profiles.length) : 'kosong', profiles.length ? 'ok' : 'bad'),
-    pill('token', withToken + '/' + profiles.length, withoutToken.length ? 'warn' : (profiles.length ? 'ok' : 'warn')),
-    pill('worker', withWorker.length ? 'ter-deploy' : 'belum', withWorker.length ? 'ok' : 'warn'),
-    pill('routing', routed.length + '/' + domains.length,
-      domains.length && routed.length === domains.length ? 'ok' : 'warn'),
-    pill('tunnel', tunnelText, tunnel.status === 'healthy' ? 'ok' : 'warn'),
-    pill('salinan', copies.length ? copies.length + ' alamat' : 'off', copies.length ? 'warn' : 'ok'),
-  );
+  const aspects = dashAspects(sys, cf);
+  const ready = aspects.filter(function (item) { return item[2] === 'ok'; }).length;
+  const ratio = aspects.length ? (ready / aspects.length) * 100 : 0;
+  setRing(ratio, ready === aspects.length ? 'ok' : (ready ? 'warn' : 'bad'));
+  ui.dbRingPct.textContent = ready + '/' + aspects.length;
+  ui.dbGrid.replaceChildren(...aspects.map(function (item) {
+    return dotCell(item[0], item[1], item[2]);
+  }));
+
+  const pipe = [];
+  dashPipe(sys, cf).forEach(function (item, index) {
+    if (index) pipe.push(node('span', 'pipe-arrow', '→'));
+    pipe.push(pipeNode(item[0], item[1], item[2]));
+  });
+  ui.dbPipe.replaceChildren(...pipe);
+
+  renderSpark(db);
+
+  const ramBytes = Number(app.rss_bytes) || 0;
+  const ramPct = (ramBytes / (100 * 1048576)) * 100;
   ui.dbTiles.replaceChildren(
-    tile('Inbox', String(countOf(db.inboxes)),
+    statTile('Inbox', String(countOf(db.inboxes)),
       'pesan ' + countOf(db.messages) + ' · lampiran ' + countOf(db.attachments)),
-    tile('Database', formatBytes(db.bytes), 'uptime ' + formatUptime(app.uptime_seconds)),
-    tile('RAM', formatMb(app.rss_bytes), 'Go ' + (app.go_version || '-')),
+    statTile('Database', formatBytes(db.bytes),
+      String(db.path || '-').split(/[\\/]/).pop()),
+    statTile('RAM', formatMb(app.rss_bytes), 'target < 100 MB · uptime ' + formatUptime(app.uptime_seconds),
+      { pct: ramPct, tone: ramPct >= 90 ? 'bad' : (ramPct >= 70 ? 'warn' : 'ok') }),
   );
-  ui.dbDetails.hidden = false;
 
   // Judul singkat; penjelasan panjang disimpan sebagai title agar tidak memenuhi layar.
   const alerts = [];

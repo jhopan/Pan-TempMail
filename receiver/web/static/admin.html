@@ -147,17 +147,47 @@
     .tile.warn .tile-value{color:var(--yellow)}
     .tile.bad .tile-value{color:var(--red)}
     .alert-list{list-style:none;display:flex;flex-direction:column;gap:8px;font-size:13px;margin-top:6px}
-    .strip{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 14px}
-    .pill{display:inline-flex;align-items:center;gap:7px;border:1px solid var(--border);background:var(--surface-2);
-      border-radius:999px;padding:5px 11px;font-size:12px;line-height:1;white-space:nowrap}
-    .pill i{width:8px;height:8px;border-radius:50%;background:var(--muted);flex:0 0 auto}
-    .pill b{font-weight:600}
-    .pill.ok i{background:var(--green)}
-    .pill.warn i{background:var(--yellow)}
-    .pill.bad i{background:var(--red)}
-    .pill.ok{border-color:rgba(34,197,94,.35)}
-    .pill.warn{border-color:rgba(250,204,21,.35)}
-    .pill.bad{border-color:rgba(239,68,68,.35)}
+    .board{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px;align-items:stretch}
+    .mini{background:var(--surface-2);border:1px solid var(--border);border-radius:9px;padding:12px 13px;
+      display:flex;flex-direction:column;gap:8px;min-width:0}
+    .mini h3{margin:0;font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);font-weight:600}
+    .mini.wide{grid-column:span 2}
+    .mini-meta{font-size:11px;color:var(--muted)}
+    .ring-card{flex-direction:row;align-items:center;gap:16px}
+    .ring{width:96px;height:96px;flex:0 0 auto}
+    .ring circle{fill:none;stroke-width:10}
+    .ring .track{stroke:var(--border)}
+    .ring .value{stroke:var(--green);stroke-linecap:round;transform:rotate(-90deg);transform-origin:60px 60px;
+      transition:stroke-dashoffset .35s ease}
+    .ring.warn .value{stroke:var(--yellow)}
+    .ring.bad .value{stroke:var(--red)}
+    .ring-meta{display:flex;flex-direction:column;gap:3px;min-width:0}
+    .ring-meta b{font-size:26px;line-height:1}
+    .ring-meta span{font-size:11px;color:var(--muted)}
+    .pipe{display:flex;flex-wrap:wrap;align-items:center;gap:6px;row-gap:8px}
+    .pipe-node{display:flex;align-items:center;gap:7px;border:1px solid var(--border);border-radius:999px;
+      padding:5px 10px;font-size:12px;background:var(--surface);max-width:100%}
+    .pipe-node i{width:9px;height:9px;border-radius:50%;background:var(--muted);flex:0 0 auto}
+    .pipe-node.ok i{background:var(--green)}
+    .pipe-node.warn i{background:var(--yellow)}
+    .pipe-node.bad i{background:var(--red)}
+    .pipe-node small{color:var(--muted);font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .pipe-arrow{color:var(--muted);font-size:12px}
+    .spark{display:flex;align-items:flex-end;gap:2px;height:66px}
+    .spark i{flex:1 1 0;min-height:3px;background:var(--green);border-radius:2px 2px 0 0;opacity:.85}
+    .spark i.zero{background:var(--border);opacity:1;min-height:2px}
+    .dotgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(104px,1fr));gap:8px}
+    .dotgrid div{display:flex;align-items:center;gap:8px;font-size:12px;border:1px solid var(--border);
+      border-radius:8px;padding:7px 10px;background:var(--surface-2);min-width:0}
+    .dotgrid i{width:9px;height:9px;border-radius:2px;background:var(--muted);flex:0 0 auto}
+    .dotgrid .ok i{background:var(--green)}
+    .dotgrid .warn i{background:var(--yellow)}
+    .dotgrid .bad i{background:var(--red)}
+    .dotgrid small{color:var(--muted);margin-left:auto;font-size:11px;white-space:nowrap}
+    .bar{height:7px;border-radius:999px;background:var(--border);overflow:hidden;margin-top:2px}
+    .bar span{display:block;height:100%;background:var(--green)}
+    .bar.warn span{background:var(--yellow)}
+    .bar.bad span{background:var(--red)}
     .alert-list li{display:flex;align-items:flex-start;gap:8px;border-radius:9px;padding:10px 12px;
       background:rgba(234,179,8,.08);border:1px solid rgba(234,179,8,.35)}
     .alert-list li.bad{background:rgba(239,68,68,.08);border-color:rgba(239,68,68,.35)}
@@ -291,8 +321,30 @@
           <div id="statusOut" class="out" role="status" aria-live="polite"></div>
           <div id="serverState" class="state" role="status"></div>
           <div id="serverWrap" hidden>
-            <div class="strip" id="dbStrip"></div>
+            <div class="board">
+              <div class="mini ring-card">
+                <svg id="dbRing" class="ring" viewBox="0 0 120 120" role="img" aria-label="Kesiapan sistem">
+                  <circle class="track" cx="60" cy="60" r="52"></circle>
+                  <circle class="value" cx="60" cy="60" r="52" stroke-dasharray="326.7" stroke-dashoffset="326.7"></circle>
+                </svg>
+                <div class="ring-meta">
+                  <b id="dbRingPct">–</b>
+                  <span>aspek siap</span>
+                </div>
+              </div>
+              <div class="mini wide">
+                <h3>Alur email</h3>
+                <div class="pipe" id="dbPipe"></div>
+              </div>
+              <div class="mini wide">
+                <h3>Aktivitas 24 jam</h3>
+                <div class="spark" id="dbSpark"></div>
+                <div class="mini-meta" id="dbSparkMeta">–</div>
+              </div>
+            </div>
             <div class="tiles" id="dbTiles"></div>
+            <h3>Aspek</h3>
+            <div class="dotgrid" id="dbGrid"></div>
           </div>
           <div id="svHelperNote" class="note warn" hidden></div>
           <div id="dbAlertsWrap" hidden>
@@ -307,24 +359,6 @@
             <a class="btn btn-s small" href="#tunnel">Tunnel</a>
             <a class="btn btn-s small" href="#diagnostics">Diagnostik</a>
             <a class="btn btn-s small" href="#users">Pengguna</a>
-          </div>
-          <div id="dbDetails" class="cards-2" hidden>
-            <div>
-              <h3>Helper root</h3>
-              <dl class="kv" id="svHelper"></dl>
-            </div>
-            <div>
-              <h3>Aplikasi</h3>
-              <dl class="kv" id="svApp"></dl>
-            </div>
-            <div>
-              <h3>Database</h3>
-              <dl class="kv" id="svDb"></dl>
-            </div>
-            <div>
-              <h3>Cloudflare</h3>
-              <dl class="kv" id="svCf"></dl>
-            </div>
           </div>
         </section>
 
@@ -731,8 +765,8 @@
     </div>
   </div>
 
-  <script src="/app/app.js?v=7"></script>
-  <script src="/app/admin.js?v=7"></script>
-  <script src="/app/admin-nav.js?v=7"></script>
+  <script src="/app/app.js?v=8"></script>
+  <script src="/app/admin.js?v=8"></script>
+  <script src="/app/admin-nav.js?v=8"></script>
 </body>
 </html>

@@ -533,10 +533,16 @@ Status shape:
 
 ```json
 {"helper":{"installed":true,"dir":"/opt/tempmail/data/helper","pending":0},
- "db":{"path":"/opt/tempmail/data/tempmail.db","bytes":40960,"inboxes":2,"messages":5,"attachments":0},
+ "db":{"path":"/opt/tempmail/data/tempmail.db","bytes":40960,"inboxes":2,"messages":5,"attachments":0,
+       "series":[0,0,1,0,2,...],"series_peak":2,"series_window_hours":24,"series_capped":false},
  "app":{"uptime_seconds":320,"rss_bytes":15728640,"go_version":"go1.25.0","site_name":"TempMail","port":"8081"},
  "cloudflare":{"profiles":2,"domains":3,"active_profile":"cf-a","worker_name":"tempmailbyjhopanstore"}}
 ```
+
+`db.series` is the panel's 24-hour activity chart: one number per hour, oldest first, last bucket is
+the hour containing "now" (UTC), and `series_capped` marks a lower bound when the 5000-row read cap
+was hit. A failing read degrades to `series: [0,…]` instead of an error, so the status endpoint always
+answers.
 
 Action result:
 

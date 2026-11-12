@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -153,6 +154,13 @@ func systemStatusHelper() gin.H {
 	return gin.H{"installed": installed, "dir": dir, "pending": pending}
 }
 
+// statusSeriesHours and statusSeriesCap drive the dashboard's hourly activity chart: 24 bars
+// counted from the last 24 hours, with a row cap so a busy instance stays cheap to read.
+const (
+	statusSeriesHours = 24
+	statusSeriesCap   = 5000
+)
+
 func systemStatusDB() gin.H {
 	db := database.Conn()
 	path := envOr("DB_PATH", "data/tempmail.db")
@@ -160,12 +168,28 @@ func systemStatusDB() gin.H {
 	if info, err := os.Stat(path); err == nil {
 		size = info.Size()
 	}
+	series, capped, err := repository.MessageSeries(db, time.Now().UTC(), statusSeriesHours, statusSeriesCap)
+	if err != nil {
+		// A broken query must not break the panel: the chart stays valid but empty.
+		log.Printf("system status: message series: %v", err)
+		series = make([]int, statusSeriesHours)
+	}
+	peak := 0
+	for _, n := range series {
+		if n > peak {
+			peak = n
+		}
+	}
 	return gin.H{
-		"path":        path,
-		"bytes":       size,
-		"inboxes":     countQuery(db, "SELECT COUNT(*) FROM inboxes"),
-		"messages":    countQuery(db, "SELECT COUNT(*) FROM messages"),
-		"attachments": countQuery(db, "SELECT COUNT(*) FROM attachments"),
+		"path":                path,
+		"bytes":               size,
+		"inboxes":             countQuery(db, "SELECT COUNT(*) FROM inboxes"),
+		"messages":            countQuery(db, "SELECT COUNT(*) FROM messages"),
+		"attachments":         countQuery(db, "SELECT COUNT(*) FROM attachments"),
+		"series":              series,
+		"series_peak":         peak,
+		"series_window_hours": statusSeriesHours,
+		"series_capped":       capped,
 	}
 }
 

@@ -60,11 +60,15 @@ type systemStatus struct {
 		Pending   int    `json:"pending"`
 	} `json:"helper"`
 	DB struct {
-		Path        string `json:"path"`
-		Bytes       int64  `json:"bytes"`
-		Inboxes     int    `json:"inboxes"`
-		Messages    int    `json:"messages"`
-		Attachments int    `json:"attachments"`
+		Path              string `json:"path"`
+		Bytes             int64  `json:"bytes"`
+		Inboxes           int    `json:"inboxes"`
+		Messages          int    `json:"messages"`
+		Attachments       int    `json:"attachments"`
+		Series            []int  `json:"series"`
+		SeriesPeak        int    `json:"series_peak"`
+		SeriesWindowHours int    `json:"series_window_hours"`
+		SeriesCapped      bool   `json:"series_capped"`
 	} `json:"db"`
 	App struct {
 		UptimeSeconds int64  `json:"uptime_seconds"`
@@ -143,6 +147,30 @@ func TestSystemStatus(t *testing.T) {
 	if got.DB.Bytes <= 0 {
 		t.Errorf("db.bytes = %d, want > 0", got.DB.Bytes)
 	}
+	if len(got.DB.Series) != 24 {
+		t.Fatalf("db.series length = %d, want 24 (one bar per hour)", len(got.DB.Series))
+	}
+	if got.DB.SeriesWindowHours != 24 {
+		t.Errorf("db.series_window_hours = %d, want 24", got.DB.SeriesWindowHours)
+	}
+	if got.DB.SeriesCapped {
+		t.Error("db.series_capped = true, want false for two seeded messages")
+	}
+	seriesTotal := 0
+	for _, n := range got.DB.Series {
+		seriesTotal += n
+	}
+	if seriesTotal != 2 {
+		t.Errorf("db.series total = %d, want 2 seeded messages", seriesTotal)
+	}
+	// The seeded rows use CURRENT_TIMESTAMP, so they belong to the hour that contains now:
+	// the last bucket of the series.
+	if last := got.DB.Series[len(got.DB.Series)-1]; last != 2 {
+		t.Errorf("db.series[23] = %d, want 2 (jam berjalan)", last)
+	}
+	if got.DB.SeriesPeak != 2 {
+		t.Errorf("db.series_peak = %d, want 2", got.DB.SeriesPeak)
+	}
 	if got.App.GoVersion == "" || got.App.SiteName != "TempMail" || got.App.Port != "8081" {
 		t.Errorf("app = %+v", got.App)
 	}
@@ -173,6 +201,10 @@ func TestSystemStatusWithoutHelperDir(t *testing.T) {
 	}
 	if got.Helper.Installed || got.Helper.Pending != 0 {
 		t.Errorf("helper = %+v, want installed=false pending=0", got.Helper)
+	}
+	// The activity series keeps its shape even when the helper dir is missing.
+	if len(got.DB.Series) != 24 || got.DB.SeriesWindowHours != 24 {
+		t.Errorf("db series = %d buckets window %d, want 24/24", len(got.DB.Series), got.DB.SeriesWindowHours)
 	}
 }
 
