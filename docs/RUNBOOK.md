@@ -101,7 +101,7 @@ Command line (`menutempmail`):
 
 1. `1` account menu: add CF profile with API token/account ID.
 2. `2` domain menu: add active Cloudflare zone to that profile.
-3. `4` login Cloudflare Tunnel and create one web hostname (root step, unchanged).
+3. `4` buat tunnel lewat API token profil aktif, lalu jalankan perintah `cloudflared service install` yang dikembalikan (langkah root, tanpa login browser).
 4. `5` select profile, deploy Worker for it.
 5. `6` activate routing for one domain.
 6. Send test email to `random@that-domain`.
@@ -230,6 +230,8 @@ curl -fsS http://127.0.0.1:8080/health
 
 Use a prior locally built binary for rollback if health check fails.
 
-## Release bootstrap status
+## Release and deployment status
 
-`scripts/install-armbian.sh` expects GitHub Release assets. The repository is private and a release asset pipeline is not yet published. Until then, use local build + SCP deployment.
+`.github/workflows/release.yml` builds Linux amd64, Linux arm64, and Windows amd64 on every `v*` tag
+and attaches them to the GitHub Release. Until a release is published for the current code, deploy with
+a local cross-build and SCP as shown above, keeping the previous binary for rollback.

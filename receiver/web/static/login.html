@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="id">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Login — TempMail By JhopanStore</title>
+  <title>Masuk, TempMail By JhopanStore</title>
   <style>
     *{margin:0;padding:0;box-sizing:border-box}
     :root{
@@ -19,12 +19,13 @@
     form{display:flex;flex-direction:column;gap:12px;text-align:left}
     label{font-size:12px;color:var(--muted);display:block;margin-bottom:4px}
     input{background:var(--surface);border:1px solid var(--border);color:var(--text);
-      padding:10px 12px;border-radius:8px;font-size:14px;width:100%;outline:none}
+      padding:10px 12px;border-radius:8px;font-size:14px;width:100%}
     input:focus{border-color:var(--brand)}
-    .err{background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.2);color:var(--red);
+    :focus-visible{outline:2px solid var(--brand);outline-offset:2px}
+    .err{background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.2);color:#fca5a5;
       padding:8px 12px;border-radius:8px;font-size:13px;display:none}
-    .btn{width:100%;padding:10px;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;
-      border:none;background:var(--brand-d);color:#fff;transition:.2s}
+    .btn{width:100%;padding:12px;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;
+      border:none;background:var(--brand-d);color:#fff;transition:.2s;min-height:44px}
     .btn:hover{background:#6d28d9}
     .credit{margin-top:24px;font-size:11px;color:var(--muted)}
     .credit b{color:var(--brand)}
@@ -34,20 +35,20 @@
   <div class="card">
     <div class="logo">⚡</div>
     <h1>TempMail <small>By JhopanStore</small></h1>
-    <p class="sub">Sign in to access your inbox</p>
+    <p class="sub">Masuk untuk membuka inbox dan panel kendali</p>
     <form id="loginForm">
       <div>
-        <label>Email</label>
-        <input id="email" type="email" required placeholder="your@email.com" />
+        <label for="email">Email admin</label>
+        <input id="email" type="email" required autocomplete="username" placeholder="nama@domain" />
       </div>
       <div>
-        <label>Password</label>
-        <input id="password" type="password" required placeholder="••••••••" />
+        <label for="password">Password</label>
+        <input id="password" type="password" required autocomplete="current-password" placeholder="password" />
       </div>
-      <div id="error" class="err"></div>
-      <button type="submit" class="btn">Sign In</button>
+      <div id="error" class="err" role="alert"></div>
+      <button type="submit" class="btn">Masuk</button>
     </form>
-    <div class="credit"><b>TempMail By JhopanStore</b> — Credit JhopanStore</div>
+    <div class="credit"><b>TempMail By JhopanStore</b>, credit JhopanStore</div>
   </div>
   <script>
     const token = localStorage.getItem('auth_token');
@@ -66,7 +67,7 @@
         });
         if (!res.ok) {
           const err = await res.json();
-          throw new Error(err.error || 'Login failed');
+          throw new Error(err.error || 'Login gagal');
         }
         const data = await res.json();
         localStorage.setItem('auth_token', data.token);
