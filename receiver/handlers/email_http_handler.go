@@ -2,13 +2,18 @@ package handlers
 
 import (
 	"bytes"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"receiver/database"
@@ -26,6 +31,43 @@ type EmailReceiveRequest struct {
 	To      string `json:"to"`
 	Raw     string `json:"raw"`     // Full RFC822 email (headers + body)
 	Subject string `json:"subject"` // Optional, parsed from Raw if empty
+}
+
+const defaultMaxRawEmailBytes = 5 << 20
+
+var signingWarningOnce sync.Once
+
+// MaxRawEmailBytes caps one forwarded email. It is exported so the SMTP path
+// applies the same limit.
+func MaxRawEmailBytes() int64 {
+	if value := os.Getenv("MAX_RAW_EMAIL_BYTES"); value != "" {
+		if parsed, err := strconv.ParseInt(value, 10, 64); err == nil && parsed > 0 {
+			return parsed
+		}
+	}
+	return defaultMaxRawEmailBytes
+}
+
+func maxRawEmailBytes() int64 { return MaxRawEmailBytes() }
+
+// verifyWorkerSignature checks the HMAC-SHA256 of the raw body that the Worker sends once
+// WORKER_SIGNING_SECRET is set. Without the secret the endpoint only needs EMAIL_API_KEY,
+// which is the previous behaviour, and it says so once in the log.
+func verifyWorkerSignature(c *gin.Context, body []byte) bool {
+	secret := os.Getenv("WORKER_SIGNING_SECRET")
+	if secret == "" {
+		signingWarningOnce.Do(func() {
+			log.Print("worker request signing is OFF: set WORKER_SIGNING_SECRET and redeploy the Worker to require X-Email-Signature")
+		})
+		return true
+	}
+	provided := strings.TrimPrefix(c.GetHeader("X-Email-Signature"), "sha256=")
+	if provided == "" {
+		return false
+	}
+	mac := hmac.New(sha256.New, []byte(secret))
+	mac.Write(body)
+	return hmac.Equal([]byte(hex.EncodeToString(mac.Sum(nil))), []byte(provided))
 }
 
 // ReceiveEmailViaHTTP handles POST /api/email/receive
@@ -57,14 +99,32 @@ func ReceiveEmailViaHTTP(c *gin.Context) {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid or missing API key"})
 		return
 	}
+
+	limit := maxRawEmailBytes()
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, limit+4096)
+	body, err := io.ReadAll(c.Request.Body)
+	if err != nil {
+		c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "Email terlalu besar", "limit_bytes": limit})
+		return
+	}
+	if !verifyWorkerSignature(c, body) {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Signature Worker tidak valid"})
+		return
+	}
+
 	var req EmailReceiveRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
+	if err := json.Unmarshal(body, &req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body"})
 		return
 	}
 
 	if req.Raw == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "raw email content required"})
+		return
+	}
+
+	if int64(len(req.Raw)) > limit {
+		c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "Email terlalu besar", "limit_bytes": limit})
 		return
 	}
 

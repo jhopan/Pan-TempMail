@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -151,7 +152,7 @@ func (s *Session) Data(r io.Reader) error {
 	return nil
 }
 
-func (s *Session) Reset() {}
+func (s *Session) Reset()        {}
 func (s *Session) Logout() error { return nil }
 
 // extractCodes finds OTP/verification codes in text.
@@ -231,6 +232,16 @@ func fireWebhook(url, recipient, sender, subject string, messageID int, codes, l
 	log.Printf("webhook: delivered to %s (status: %d)", url, resp.StatusCode)
 }
 
+// maxRawEmailBytes mirrors the HTTP ingestion cap so both intake paths use one limit.
+func maxRawEmailBytes() int64 {
+	if value := os.Getenv("MAX_RAW_EMAIL_BYTES"); value != "" {
+		if parsed, err := strconv.ParseInt(value, 10, 64); err == nil && parsed > 0 {
+			return parsed
+		}
+	}
+	return 5 << 20
+}
+
 // Start launches the built-in SMTP server on port 25.
 // This replaces Maddy entirely — one less process to run.
 func Start() {
@@ -246,7 +257,7 @@ func Start() {
 
 	server := smtp.NewServer(&Backend{})
 	server.Addr = fmt.Sprintf("%s:%s", host, port)
-	server.MaxMessageBytes = 10 * 1024 * 1024 // 10MB
+	server.MaxMessageBytes = maxRawEmailBytes()
 	server.MaxRecipients = 5
 
 	log.Printf("SMTP server listening on %s:%s (built-in, no Maddy needed)", host, port)

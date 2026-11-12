@@ -436,6 +436,11 @@ func CFDeployWorker(c *gin.Context) {
 		{Name: "TEMPMAIL_API_KEY", Type: "secret_text", Text: apiKey},
 		{Name: "FORWARD_LIST", Type: "secret_text", Text: copies},
 	}
+	secrets := []string{"TEMPMAIL_SERVER_URL", "TEMPMAIL_API_KEY", "FORWARD_LIST"}
+	if signingSecret := strings.TrimSpace(os.Getenv("WORKER_SIGNING_SECRET")); signingSecret != "" {
+		bindings = append(bindings, cloudflare.Binding{Name: "TEMPMAIL_SIGNING_SECRET", Type: "secret_text", Text: signingSecret})
+		secrets = append(secrets, "TEMPMAIL_SIGNING_SECRET")
+	}
 	deployment, err := client.DeployWorker(profile.AccountID, worker.Name(), worker.CompatDate(), worker.Script(), bindings)
 	if err != nil {
 		cfFail(c, http.StatusBadGateway, "Cloudflare menolak deploy Worker", err)
@@ -453,7 +458,7 @@ func CFDeployWorker(c *gin.Context) {
 		"profile":     profile.ID,
 		"worker":      worker.Name(),
 		"modified_on": deployment.ModifiedOn,
-		"secrets":     []string{"TEMPMAIL_SERVER_URL", "TEMPMAIL_API_KEY", "FORWARD_LIST"},
+		"secrets":     secrets,
 	})
 }
 
