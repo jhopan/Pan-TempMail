@@ -58,6 +58,9 @@ const ui = {
   tnName: document.getElementById('tnName'),
   tnSaveBtn: document.getElementById('tnSaveBtn'),
   tnCreateBtn: document.getElementById('tnCreateBtn'),
+  tnHelperBtn: document.getElementById('tnHelperBtn'),
+  tnHelperMeta: document.getElementById('tnHelperMeta'),
+  tnHelperOut: document.getElementById('tnHelperOut'),
   copiesState: document.getElementById('copiesState'),
   copiesWrap: document.getElementById('copiesWrap'),
   copiesList: document.getElementById('copiesList'),
@@ -805,9 +808,10 @@ function renderDashboard(sys, cf, cfError) {
     tile('Worker', withWorker.length ? 'Ter-deploy' : 'Belum',
       withWorker.length ? withWorker.map(function (p) { return p.id; }).join(', ') : (cf && cf.worker_name) || '-',
       withWorker.length ? 'ok' : 'warn'),
-    tile('Tunnel', tunnel.status || 'unknown',
-      tunnel.web_host || 'web host belum diisi',
-      tunnel.status === 'healthy' ? 'ok' : (tunnel.error ? 'bad' : 'warn')),
+    tile('Tunnel',
+      tunnel.status && tunnel.status !== 'unknown' ? tunnel.status : 'belum terbaca',
+      tunnel.error ? 'butuh API token, cek konektor di panel Tunnel' : (tunnel.web_host || 'web host belum diisi'),
+      tunnel.status === 'healthy' ? 'ok' : 'warn'),
     tile('Inbox', String(countOf(db.inboxes)),
       'pesan ' + countOf(db.messages) + ', lampiran ' + countOf(db.attachments)),
     tile('Database', formatBytes(db.bytes), db.path || '-'),
@@ -836,7 +840,7 @@ function renderDashboard(sys, cf, cfError) {
     alerts.push(['warn', 'Web host tunnel belum diisi, Worker akan mengirim ke URL kosong.', '#tunnel', 'Isi web host']);
   }
   if (tunnel.error) {
-    alerts.push(['warn', 'Status tunnel dari Cloudflare: ' + tunnel.error, '#tunnel', 'Periksa tunnel']);
+    alerts.push(['warn', 'Info tunnel dari Cloudflare API belum terbaca (' + tunnel.error + '). Konektor cloudflared di server tetap jalan: buktikan dengan tombol Cek konektor di panel Tunnel, tanpa perlu API token.', '#tunnel', 'Cek konektor']);
   }
   if (copies.length && !withWorker.length) {
     alerts.push(['warn', 'Tujuan salinan sudah diset tapi belum ada Worker ter-deploy, jadi salinan belum dipakai.', '#copies', 'Lihat salinan']);
@@ -1463,6 +1467,19 @@ function bindSections() {
   ui.pfReloadBtn.addEventListener('click', function () { run(ui.pfReloadBtn, ui.profilesMsg, loadProfiles); });
   ui.dmReloadBtn.addEventListener('click', function () { run(ui.dmReloadBtn, ui.domainsMsg, loadDomains); });
   ui.tnReloadBtn.addEventListener('click', function () { run(ui.tnReloadBtn, ui.tunnelMsg, loadTunnel); });
+
+  ui.tnHelperBtn.addEventListener('click', function () {
+    run(ui.tnHelperBtn, ui.tnHelperMeta, async function () {
+      const body = await apiPost('/action', { action: 'tunnel-status' });
+      const output = body && body.output ? String(body.output) : '';
+      ui.tnHelperOut.textContent = output;
+      ui.tnHelperOut.hidden = !output;
+      const failed = body && body.ok === false;
+      message(ui.tnHelperMeta, failed ? 'error' : 'ok',
+        failed ? (body.error || 'Helper menolak permintaan') : 'Status konektor cloudflared dari server diambil',
+        'status: ' + ((body && body.status) || 'unknown'));
+    });
+  });
 
   ui.profileForm.addEventListener('submit', function (event) {
     event.preventDefault();

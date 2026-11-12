@@ -447,7 +447,7 @@
             <div class="field">
               <label for="pfToken">API token</label>
               <input id="pfToken" type="password" required autocomplete="off" placeholder="cloudflare api token">
-              <span class="hint">Butuh izin Zone:Read, Email Routing Rules:Edit, Workers Scripts:Edit.</span>
+              <span class="hint">Buat di <a href="https://dash.cloudflare.com/profile/api-tokens" target="_blank" rel="noreferrer">dash.cloudflare.com/profile/api-tokens</a> dengan izin Zone:Read, Email Routing Rules:Edit, Workers Scripts:Edit (tambah Cloudflare Tunnel:Edit bila mau kelola tunnel dari panel). Token lama tidak wajib login ulang: tempel di baris profil untuk mengganti.</span>
             </div>
             <label class="check"><input id="pfActivate" type="checkbox"> Jadikan profil aktif</label>
             <div class="form-actions">
@@ -523,6 +523,13 @@
             </div>
           </form>
           <p class="note">Memasang, me-restart, dan logout konektor <span class="mono">cloudflared</span> ada di panel <b>Server</b> karena butuh helper root.</p>
+          <h3>Konektor di server (tanpa API token)</h3>
+          <p class="note">Status dari <span class="mono">cloudflared</span> di host ini dibaca helper root, jadi tetap jalan walau profil Cloudflare belum punya API token. Info di atas (nama, ID, koneksi, web host) datang dari Cloudflare API dan baru terisi setelah token ditempel.</p>
+          <div class="row-actions">
+            <button id="tnHelperBtn" class="btn btn-s" type="button">Cek konektor</button>
+          </div>
+          <div id="tnHelperMeta" class="out" role="status" aria-live="polite"></div>
+          <pre id="tnHelperOut" class="output" tabindex="0" hidden></pre>
         </section>
 
         <section class="panel card" data-panel="copies" aria-labelledby="hCopies" hidden>
@@ -677,8 +684,8 @@
     </div>
   </div>
 
-  <script src="/app/app.js?v=3"></script>
-  <script src="/app/admin.js?v=3"></script>
-  <script src="/app/admin-nav.js?v=3"></script>
+  <script src="/app/app.js?v=5"></script>
+  <script src="/app/admin.js?v=5"></script>
+  <script src="/app/admin-nav.js?v=5"></script>
 </body>
 </html>
