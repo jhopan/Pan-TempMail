@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"flag"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -14,12 +16,24 @@ import (
 	"receiver/cleanup"
 	"receiver/config"
 	"receiver/database"
+	"receiver/handlers"
 	"receiver/smtp"
 
 	"github.com/joho/godotenv"
 )
 
+// version diisi saat build: -ldflags "-X main.version=v1.2.3". Dipakai untuk memastikan
+// pembaruan benar-benar mendarat dan untuk laporan di panel.
+var version = "dev"
+
 func main() {
+	showVersion := flag.Bool("version", false, "cetak versi lalu keluar")
+	flag.Parse()
+	if *showVersion {
+		fmt.Println(version)
+		return
+	}
+
 	// Load .env if present (optional — env vars can be set directly)
 	_ = godotenv.Load()
 
@@ -36,6 +50,9 @@ func main() {
 			strings.Join(generated, ", "), secretsPath)
 	}
 
+	// Panel melaporkan versi biner ini supaya pembaruan bisa diverifikasi dari browser.
+	handlers.SetVersion(version)
+
 	// Startup banner
 	siteName := os.Getenv("SITE_NAME")
 	if siteName == "" {
@@ -45,7 +62,7 @@ func main() {
 	if port == "" {
 		port = "8080"
 	}
-	banner := "\n==============================================\n  " + siteName + "\n        Credit JhopanStore\n==============================================\n"
+	banner := "\n==============================================\n  " + siteName + " " + version + "\n        Credit JhopanStore\n==============================================\n"
 	log.Println(banner)
 
 	// Connect to the SQLite database (one file, WAL)

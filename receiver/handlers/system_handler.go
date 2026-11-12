@@ -381,3 +381,15 @@ func readHelperResult(path string) (map[string]any, bool) {
 	_ = os.Remove(path)
 	return result, true
 }
+
+// buildVersion dibaca dari -ldflags "-X main.version=..." lewat variabel paket yang diisi main.
+var version = "dev"
+
+// setVersion dipanggil main saat start supaya panel bisa melaporkan versi biner.
+func SetVersion(v string) {
+	if strings.TrimSpace(v) != "" {
+		version = v
+	}
+}
+
+func buildVersion() string { return version }

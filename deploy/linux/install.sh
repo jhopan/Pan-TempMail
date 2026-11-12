@@ -13,7 +13,6 @@
 #   bash install.sh --os windows --dry-run
 set -euo pipefail
 
-REPO="jhopan/Pan-TempMail"
 REL_BASE="https://github.com/${REPO}/releases"
 APP_NAME="Pan-TempMail"
 SITE_NAME="Pan-TempMail"
@@ -30,6 +29,10 @@ FORCE_OS=""
 FORCE_ARCH=""
 DRY_RUN=0
 NO_SERVICE=0
+UPDATE=0
+FROM_FILE=""
+REPO="${PAN_TM_REPO:-jhopan/Pan-TempMail}"
+TOKEN="${PAN_TM_TOKEN:-}"
 
 usage() {
   cat <<'TXT'
@@ -37,11 +40,20 @@ Pan-TempMail installer
 
   --port N          port the app listens on (asks when omitted)
   --version TAG     release to install, for example v1.1.0 (default: latest)
+  --update          update an existing server install (binary, scripts, helper, units)
+  --from-file PATH  install this binary instead of downloading (implies no tarball fetch)
+  --repo OWNER/NAME repository to download from (default jhopan/Pan-TempMail)
   --os NAME         override detection: linux | termux | macos | windows
   --arch NAME       override detection: amd64 | arm64
   --no-service      never install a systemd service, even as root
   --dry-run         print the plan and exit, change nothing
   -h, --help        this text
+
+Update an existing install, one command:
+
+  sudo /opt/tempmail/install.sh --update
+
+Private fork? Set PAN_TM_TOKEN or write a read-only token to /etc/tempmail/github-token.
 
 Linux as root installs /opt/tempmail + systemd units + the root helper.
 Termux, macOS, Windows and non-root Linux get a portable install with a run command;
@@ -58,12 +70,20 @@ while [ $# -gt 0 ]; do
     --version) VERSION=${2:-}; shift 2 ;;
     --os) FORCE_OS=${2:-}; shift 2 ;;
     --arch) FORCE_ARCH=${2:-}; shift 2 ;;
+    --update) UPDATE=1; shift ;;
+    --from-file) FROM_FILE=${2:-}; shift 2 ;;
+    --repo) REPO=${2:-}; shift 2 ;;
     --no-service) NO_SERVICE=1; shift ;;
     --dry-run) DRY_RUN=1; shift ;;
     -h|--help) usage; exit 0 ;;
     *) die "argumen tidak dikenal: $1 (pakai --help)" ;;
   esac
 done
+
+# Token opsional: dibutuhkan kalau repo-nya privat (bukan untuk repo publik).
+if [ -z "$TOKEN" ] && [ -r /etc/tempmail/github-token ]; then
+  TOKEN=$(tr -d '\r\n' < /etc/tempmail/github-token)
+fi
 
 # --- deteksi lingkungan -------------------------------------------------------
 
@@ -185,6 +205,33 @@ fetch() {
   fi
 }
 
+# fetch_asset mengunduh satu aset rilis. Repo publik memakai URL rilis langsung; kalau token
+# tersedia (repo privat), lewat API aset dengan header Authorization.
+fetch_asset() {
+  local name=$1 out=$2 asset_id
+  if [ -z "$TOKEN" ]; then
+    fetch "${DOWNLOAD_BASE}/${name}" "$out"
+    return
+  fi
+  [ -n "${PYTHON:-}" ] || PYTHON=$(command -v python3 || true)
+  [ -n "$PYTHON" ] || die "butuh python3 untuk mengunduh aset repo privat"
+  local api
+  if [ "$VERSION" = "latest" ]; then
+    api="https://api.github.com/repos/${REPO}/releases/latest"
+  else
+    api="https://api.github.com/repos/${REPO}/releases/tags/${VERSION}"
+  fi
+  asset_id=$(curl -fsSL -H "Authorization: Bearer ${TOKEN}" -H "Accept: application/vnd.github+json" "$api" \
+    | "$PYTHON" -c 'import json,sys; name=sys.argv[1]; data=json.load(sys.stdin); print(next((a["id"] for a in data.get("assets", []) if a["name"] == name), ""))' "$name")
+  [ -n "$asset_id" ] || die "aset ${name} tidak ada di rilis ${VERSION} (${REPO})"
+  if command -v curl >/dev/null 2>&1; then
+    curl -fsSL --retry 3 --max-time 300 -H "Authorization: Bearer ${TOKEN}" -H "Accept: application/octet-stream" \
+      "https://api.github.com/repos/${REPO}/releases/assets/${asset_id}" -o "$out"
+  else
+    die "butuh curl untuk mengunduh aset repo privat"
+  fi
+}
+
 sha256_of() {
   if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1" | cut -d' ' -f1
   elif command -v shasum >/dev/null 2>&1; then shasum -a 256 "$1" | cut -d' ' -f1
@@ -252,8 +299,14 @@ TMP_DIR=$(mktemp -d "${TMPDIR:-/tmp}/pan-tempmail.XXXXXX")
 cleanup() { rm -rf "$TMP_DIR"; }
 trap cleanup EXIT
 
-log "mengunduh biner ${ASSET} ..."
-fetch "$BINARY_URL" "${TMP_DIR}/${ASSET}"
+if [ -n "$FROM_FILE" ]; then
+  [ -f "$FROM_FILE" ] || die "berkas tidak ditemukan: $FROM_FILE"
+  log "memakai biner lokal ${FROM_FILE} (tanpa unduh)"
+  cp "$FROM_FILE" "${TMP_DIR}/${ASSET}"
+else
+  log "mengunduh biner ${ASSET} ..."
+  fetch_asset "$ASSET" "${TMP_DIR}/${ASSET}"
+fi
 log "mengunduh daftar checksum ..."
 if ! fetch "$CHECKSUM_URL" "${TMP_DIR}/checksums.txt" 2>/dev/null; then
   log "  daftar checksum tidak tersedia, verifikasi dilewati"
@@ -317,49 +370,71 @@ if [ "$MODE" = "portable" ]; then
   log "akses dari HP lain di LAN: http://<ip-lan>:${PORT}/app/"
   exit 0
 fi
-
 # --- mode server (Linux, root, systemd) ---------------------------------------
 
 [ "$(id -u)" = 0 ] || die "mode server butuh root"
-if ! command -v apt-get >/dev/null 2>&1; then
-  die "distro ini belum didukung otomatis (butuh apt). Pasang manual: sqlite3, ca-certificates, curl, python3, openssl"
+
+OLD_VERSION="?"
+if [ "$UPDATE" = "1" ]; then
+  [ -x "$ROOT/tempmail" ] || die "belum ada instalasi di ${ROOT}; jalankan tanpa --update"
+  OLD_VERSION=$("$ROOT/tempmail" --version 2>/dev/null || echo "?")
+  log "update dari versi ${OLD_VERSION} ..."
 fi
 
-log "memasang paket sistem ..."
-apt-get update -qq
-apt-get install -y -qq sqlite3 ca-certificates curl python3 openssl >/dev/null
+if [ "$UPDATE" = "0" ] || ! command -v sqlite3 >/dev/null 2>&1 || ! command -v python3 >/dev/null 2>&1; then
+  if ! command -v apt-get >/dev/null 2>&1; then
+    die "distro ini belum didukung otomatis (butuh apt). Pasang manual: sqlite3, ca-certificates, curl, python3, openssl"
+  fi
+  log "memasang paket sistem ..."
+  apt-get update -qq
+  apt-get install -y -qq sqlite3 ca-certificates curl python3 openssl >/dev/null
+fi
 
 log "menyiapkan user dan direktori ..."
 id -u "$APP_USER" >/dev/null 2>&1 || useradd --system --home "$ROOT" --shell /usr/sbin/nologin "$APP_USER"
 install -d -o "$APP_USER" -g "$APP_USER" -m 0750 "$ROOT/data"
 install -d -o "$APP_USER" -g "$APP_USER" -m 0750 "$ROOT/data/attachments" "$ROOT/backups" "$ROOT/worker" "$ENV_DIR"
 
-log "mengunduh skrip pendukung (tarball) ..."
-fetch "$TARBALL_URL" "${TMP_DIR}/pan-tempmail.tar.gz"
-mkdir -p "${TMP_DIR}/src"
-tar -xzf "${TMP_DIR}/pan-tempmail.tar.gz" -C "${TMP_DIR}/src"
-SRC_DIR="${TMP_DIR}/src"
-[ -d "${SRC_DIR}/deploy/linux" ] || die "tarball rilis tidak memuat deploy/linux"
-SOURCE_DIR="${SRC_DIR}/deploy/linux"
-WORKER_DIR="${SRC_DIR}/cloudflare-worker"
+SOURCE_DIR=""
+if [ -z "$FROM_FILE" ]; then
+  log "mengunduh skrip pendukung (tarball) ..."
+  fetch_asset "pan-tempmail.tar.gz" "${TMP_DIR}/pan-tempmail.tar.gz"
+  mkdir -p "${TMP_DIR}/src"
+  tar -xzf "${TMP_DIR}/pan-tempmail.tar.gz" -C "${TMP_DIR}/src"
+  SRC_DIR="${TMP_DIR}/src"
+  [ -d "${SRC_DIR}/deploy/linux" ] || die "tarball rilis tidak memuat deploy/linux"
+  SOURCE_DIR="${SRC_DIR}/deploy/linux"
+  WORKER_DIR="${SRC_DIR}/cloudflare-worker"
+else
+  log "melewati skrip dan helper (mode --from-file hanya mengganti biner)"
+fi
 
+# Biner lama disimpan sebelum ditimpa, supaya update yang gagal bisa dibalik.
+if [ -f "$ROOT/tempmail" ]; then
+  install -d -o root -g root -m 0750 "$ROOT/backups/binaries"
+  cp -p "$ROOT/tempmail" "$ROOT/tempmail.prev"
+  cp -p "$ROOT/tempmail" "$ROOT/backups/binaries/tempmail-$(date +%Y%m%d-%H%M%S)"
+fi
 install -o root -g root -m 0755 "${TMP_DIR}/${ASSET}" "$ROOT/tempmail"
-install -o root -g root -m 0755 "$SOURCE_DIR/tempmailctl" /usr/local/sbin/tempmailctl
-install -o root -g root -m 0755 "$SOURCE_DIR/menutempmail" /usr/local/bin/menutempmail
-install -o root -g root -m 0755 "$SOURCE_DIR/setup.sh" "$ROOT/setup.sh"
-install -o root -g root -m 0644 "$SOURCE_DIR/tempmail.service" /etc/systemd/system/tempmail.service
-install -o root -g root -m 0644 "$SOURCE_DIR/tempmail-backup.service" /etc/systemd/system/tempmail-backup.service
-install -o root -g root -m 0644 "$SOURCE_DIR/tempmail-backup.timer" /etc/systemd/system/tempmail-backup.timer
-install -o root -g root -m 0755 "$SOURCE_DIR/tempmail-root" /usr/local/sbin/tempmail-root
-install -o root -g root -m 0644 "$SOURCE_DIR/tempmail-root.service" /etc/systemd/system/tempmail-root.service
-install -o root -g root -m 0644 "$SOURCE_DIR/tempmail-root.path" /etc/systemd/system/tempmail-root.path
-install -o root -g root -m 0644 "$SOURCE_DIR/tempmail-root.timer" /etc/systemd/system/tempmail-root.timer
-install -d -o "$APP_USER" -g "$APP_USER" -m 0750 "$ROOT/data/helper" "$ROOT/data/helper/in" "$ROOT/data/helper/out"
-install -d -o root -g root -m 0700 "$ROOT/data/helper/state"
 
-if [ -d "$WORKER_DIR" ]; then
-  cp -a "$WORKER_DIR/." "$ROOT/worker/"
-  chown -R root:root "$ROOT/worker"
+if [ -n "$SOURCE_DIR" ]; then
+  install -o root -g root -m 0755 "$SOURCE_DIR/install.sh" "$ROOT/install.sh"
+  install -o root -g root -m 0755 "$SOURCE_DIR/tempmailctl" /usr/local/sbin/tempmailctl
+  install -o root -g root -m 0755 "$SOURCE_DIR/menutempmail" /usr/local/bin/menutempmail
+  install -o root -g root -m 0755 "$SOURCE_DIR/setup.sh" "$ROOT/setup.sh"
+  install -o root -g root -m 0644 "$SOURCE_DIR/tempmail.service" /etc/systemd/system/tempmail.service
+  install -o root -g root -m 0644 "$SOURCE_DIR/tempmail-backup.service" /etc/systemd/system/tempmail-backup.service
+  install -o root -g root -m 0644 "$SOURCE_DIR/tempmail-backup.timer" /etc/systemd/system/tempmail-backup.timer
+  install -o root -g root -m 0755 "$SOURCE_DIR/tempmail-root" /usr/local/sbin/tempmail-root
+  install -o root -g root -m 0644 "$SOURCE_DIR/tempmail-root.service" /etc/systemd/system/tempmail-root.service
+  install -o root -g root -m 0644 "$SOURCE_DIR/tempmail-root.path" /etc/systemd/system/tempmail-root.path
+  install -o root -g root -m 0644 "$SOURCE_DIR/tempmail-root.timer" /etc/systemd/system/tempmail-root.timer
+  install -d -o "$APP_USER" -g "$APP_USER" -m 0750 "$ROOT/data/helper" "$ROOT/data/helper/in" "$ROOT/data/helper/out"
+  install -d -o root -g root -m 0700 "$ROOT/data/helper/state"
+  if [ -d "$WORKER_DIR" ]; then
+    cp -a "$WORKER_DIR/." "$ROOT/worker/"
+    chown -R root:root "$ROOT/worker"
+  fi
 fi
 
 if [ ! -f "$ENV_DIR/tempmail.env" ]; then
@@ -403,21 +478,53 @@ if ! command -v cloudflared >/dev/null 2>&1; then
   fi
 fi
 
-systemctl daemon-reload
-systemctl enable --now "$SERVICE" tempmail-backup.timer tempmail-root.path tempmail-root.timer
+printf '%s\n' "$VERSION" > "$ROOT/VERSION"
+chmod 0644 "$ROOT/VERSION"
 
-for _ in $(seq 1 15); do
-  if curl -fsS "http://127.0.0.1:${PORT}/health" >/dev/null 2>&1; then break; fi
+systemctl daemon-reload
+if [ "$UPDATE" = "1" ]; then
+  systemctl restart "$SERVICE"
+else
+  systemctl enable --now "$SERVICE" tempmail-backup.timer tempmail-root.path tempmail-root.timer
+fi
+
+healthy=0
+for _ in $(seq 1 20); do
+  if curl -fsS "http://127.0.0.1:${PORT}/health" >/dev/null 2>&1; then healthy=1; break; fi
   sleep 1
 done
-if curl -fsS "http://127.0.0.1:${PORT}/health" >/dev/null 2>&1; then
+
+NEW_VERSION=$("$ROOT/tempmail" --version 2>/dev/null || echo "?")
+
+if [ "$healthy" = "0" ] && [ -f "$ROOT/tempmail.prev" ]; then
+  log "health check gagal; mengembalikan biner sebelumnya ..."
+  cp -p "$ROOT/tempmail.prev" "$ROOT/tempmail"
+  systemctl restart "$SERVICE"
+  for _ in $(seq 1 15); do
+    if curl -fsS "http://127.0.0.1:${PORT}/health" >/dev/null 2>&1; then healthy=2; break; fi
+    sleep 1
+  done
+  if [ "$healthy" = "2" ]; then
+    die "update gagal (biner ${NEW_VERSION} tidak sehat); sudah dikembalikan ke versi ${OLD_VERSION} dan service jalan lagi"
+  fi
+  die "update gagal dan rollback juga tidak sehat; cek: journalctl -u ${SERVICE} -n 50 --no-pager"
+fi
+
+if [ "$healthy" = "1" ]; then
   log "health check: OK"
 else
   log "health check belum menjawab; cek: systemctl status ${SERVICE} --no-pager"
 fi
 
 log ""
-log "selesai. Langkah berikutnya di browser:"
-log "  1. http://<ip-lan>:${PORT}/app/login.html  -> buat admin pertama"
+if [ "$UPDATE" = "1" ]; then
+  log "selesai: ${OLD_VERSION} -> ${NEW_VERSION} (port ${PORT})"
+  log "riwayat biner lama: ${ROOT}/backups/binaries/"
+else
+  log "selesai: versi ${NEW_VERSION} terpasang (port ${PORT})"
+fi
+log "langkah berikutnya di browser:"
+log "  1. http://<ip-lan>:${PORT}/app/login.html  -> buat admin pertama (kalau belum ada)"
 log "  2. http://<ip-lan>:${PORT}/admin           -> Setup: API token Cloudflare, tunnel, domain"
+log "update berikutnya: sudo ${ROOT}/install.sh --update"
 log "menu server: sudo menutempmail   (opsi 3 untuk menempel API token profil)"

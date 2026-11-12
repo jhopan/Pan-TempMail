@@ -277,6 +277,35 @@ sudo systemctl start tempmail
 curl -fsS http://127.0.0.1:8080/health
 ```
 
+## Updating from GitHub Releases
+
+Production is driven by releases, not by copying files over SSH.
+
+```bash
+sudo /opt/tempmail/install.sh --update     # atau: menutempmail -> U
+```
+
+What that does, in order: reads the version now running, downloads the latest release
+(`pan-tempmail-linux-<arch>` plus `pan-tempmail.tar.gz` for scripts, helper and units), keeps the previous
+binary in `/opt/tempmail/tempmail.prev` and a timestamped copy in `/opt/tempmail/backups/binaries/`,
+replaces binary plus scripts, restarts the service, waits for `/health`, and reports `old -> new`. If the
+new binary does not become healthy it restores the previous one, restarts, and fails loudly. The env file,
+the database, secrets and the Cloudflare state are never touched by an update.
+
+Useful flags: `--version v1.1.0` (pin a release), `--repo owner/name` (fork), `--from-file /path/to/binary`
+(offline), `--dry-run` (print the plan). The repo is public, so no token is needed; for a private fork put a
+read-only token in `/etc/tempmail/github-token` (0600) or set `PAN_TM_TOKEN`.
+
+The version currently installed is visible in three places: `cat /opt/tempmail/VERSION`, the badge next to
+the helper pill in the panel header, and the `Versi` row in the `Diagnostik` panel.
+
+Cutting a release:
+
+```bash
+git tag v1.1.0
+git push origin v1.1.0     # GitHub Actions builds 5 targets + 2 tarballs + checksums
+```
+
 ## Updating binary
 
 Build on Windows, never on VPS/Armbian:

@@ -755,6 +755,28 @@ guided_setup() {
   echo "  Opsional: Cloudflare Tunnel:Edit (kelola tunnel dari panel), Account Settings:Read."
 }
 
+# update_from_github: ambil rilis terbaru dari GitHub lalu jalankan installer mode update.
+# Installer yang sama juga dipasang di /opt/tempmail/install.sh oleh setiap update.
+update_from_github() {
+  local script="$APP/install.sh" version_before version_after
+  version_before=$("$APP/tempmail" --version 2>/dev/null || echo "?")
+  if [ ! -x "$script" ]; then
+    echo "installer belum ada di $script, mengunduhnya dari repo..."
+    if command -v curl >/dev/null 2>&1; then
+      curl -fsSL "https://raw.githubusercontent.com/jhopan/Pan-TempMail/main/deploy/linux/install.sh" -o "$script" || { echo "unduhan installer gagal."; return 0; }
+    else
+      echo "butuh curl untuk mengunduh installer."; return 0
+    fi
+    chmod 0755 "$script"
+  fi
+  echo "Versi sekarang: $version_before"
+  echo "Menjalankan installer (mode update) dari GitHub release terbaru..."
+  bash "$script" --update || { echo "Update gagal; cek pesan di atas."; return 0; }
+  version_after=$("$APP/tempmail" --version 2>/dev/null || echo "?")
+  echo "Versi setelah update: $version_after"
+  echo "Riwayat biner: $APP/backups/binaries/"
+}
+
 # panel_url: alamat panel admin dari web host tunnel, atau alamat lokal sebagai cadangan.
 panel_url() {
   local host
@@ -1231,6 +1253,7 @@ main() {
     echo -e "  ${C_CYAN}8${C_NC}) SETUP GUIDED ${C_DIM}(sekali jalan)${C_NC}"
     echo -e "  ${C_CYAN}9${C_NC}) AUTO SETUP ${C_DIM}(bertahap)${C_NC}"
     echo -e "  ${C_YELLOW}A${C_NC}) Kelola admin ${C_DIM}(buat/cek/reset)${C_NC}"
+    echo -e "  ${C_GREEN}U${C_NC}) Update dari GitHub Release ${C_DIM}(biner + skrip + helper)${C_NC}"
     echo -e "  ${C_GREEN}D${C_NC}) Doctor ${C_DIM}(cek semua status)${C_NC}"
     echo
     echo -e "  ${C_DIM}─── Maintenance ───${C_NC}"
@@ -1248,6 +1271,7 @@ main() {
       6) enable_routing_for_domain ;; 7) set_copy_destinations ;;
       8) guided_setup ;; 9) full_setup ;;
       A|a) manage_admin ;;
+      U|u) update_from_github ;;
       D|d) doctor ;;
       L2|l2) logout_tunnel ;;
       L3|l3) reset_all ;;

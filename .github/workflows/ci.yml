@@ -53,7 +53,7 @@ jobs:
             if [ "$os" = "windows" ]; then
               out="$out.exe"
             fi
-            GOOS="$os" GOARCH="$arch" go build -o "$out" .
+            GOOS="$os" GOARCH="$arch" go build -ldflags="-X main.version=ci-smoke" -o "$out" .
           done
 
       - name: JavaScript syntax

@@ -92,6 +92,7 @@ const ui = {
   serverState: document.getElementById('serverState'),
   serverWrap: document.getElementById('serverWrap'),
   svHelperNote: document.getElementById('svHelperNote'),
+  versionPill: document.getElementById('versionPill'),
   dbRing: document.getElementById('dbRing'),
   dbRingPct: document.getElementById('dbRingPct'),
   dbPipe: document.getElementById('dbPipe'),
@@ -1612,6 +1613,10 @@ async function loadSystemStatus() {
     }
     state.system = out;
     state.systemHelper = !!(state.system.helper && state.system.helper.installed);
+    if (ui.versionPill) {
+      const appInfo = (state.system && state.system.app) || {};
+      ui.versionPill.textContent = 'versi: ' + (appInfo.version || 'dev');
+    }
     renderSystem();
     refreshDashboard();
   } catch (err) {
@@ -2262,6 +2267,7 @@ async function loadDiagnostics() {
     ['Request tertunda', sys ? String(countOf(helper.pending)) : '-'],
   ]);
   fillKv(ui.dgApp, [
+    ['Versi', app.version || '-'],
     ['Uptime', sys ? formatUptime(app.uptime_seconds) : '-'],
     ['RAM', sys ? formatMb(app.rss_bytes) : '-'],
     ['Versi Go', app.go_version || '-'],

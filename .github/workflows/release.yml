@@ -59,7 +59,7 @@ jobs:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
         run: |
-          go build -ldflags="-s -w" -o "../${{ steps.names.outputs.stable }}" .
+          go build -ldflags="-s -w -X main.version=${VERSION}" -o "../${{ steps.names.outputs.stable }}" .
           cp "../${{ steps.names.outputs.stable }}" "../${{ steps.names.outputs.versioned }}"
 
       - uses: actions/upload-artifact@v4
