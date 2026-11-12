@@ -1,99 +1,423 @@
 #!/usr/bin/env bash
-# TempMail installer for Debian/Ubuntu/Armbian (root).
-# Run as root from a repo checkout (or a directory that has the scripts + cloudflare-worker/),
-# with the binary path as the first argument. Defaults match the release asset names.
+# Pan-TempMail installer.
+#
+# Detects the environment (Linux, Termux, macOS, Windows shell), downloads the Go binary from
+# the latest GitHub release, asks for the port, then either installs a systemd service (Linux,
+# root) or lays down a portable install with the command to run.
+#
+# Usage:
+#   sudo bash install.sh                 # Linux server, service install
+#   bash install.sh --dry-run            # show what would happen, change nothing
+#   bash install.sh --port 8081          # skip the port question
+#   bash install.sh --version v1.1.0     # pin a release instead of latest
+#   bash install.sh --os windows --dry-run
 set -euo pipefail
 
-ROOT=/opt/tempmail
-ENV_DIR=/etc/tempmail
-APP_USER=tempmail
-SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-REPO_ROOT=$(CDPATH= cd -- "$SCRIPT_DIR/../.." && pwd)
+REPO="jhopan/Pan-TempMail"
+REL_BASE="https://github.com/${REPO}/releases"
+APP_NAME="Pan-TempMail"
+SITE_NAME="Pan-TempMail"
 
-if [ $# -ge 1 ]; then
-  BINARY=$1
+ROOT="/opt/tempmail"
+ENV_DIR="/etc/tempmail"
+APP_USER="tempmail"
+SERVICE="tempmail.service"
+DEFAULT_PORT=8080
+
+PORT=""
+VERSION="latest"
+FORCE_OS=""
+FORCE_ARCH=""
+DRY_RUN=0
+NO_SERVICE=0
+
+usage() {
+  cat <<'TXT'
+Pan-TempMail installer
+
+  --port N          port the app listens on (asks when omitted)
+  --version TAG     release to install, for example v1.1.0 (default: latest)
+  --os NAME         override detection: linux | termux | macos | windows
+  --arch NAME       override detection: amd64 | arm64
+  --no-service      never install a systemd service, even as root
+  --dry-run         print the plan and exit, change nothing
+  -h, --help        this text
+
+Linux as root installs /opt/tempmail + systemd units + the root helper.
+Termux, macOS, Windows and non-root Linux get a portable install with a run command;
+those service adapters are not implemented yet and the installer says so.
+TXT
+}
+
+log() { printf '%s\n' "$*"; }
+die() { printf 'error: %s\n' "$*" >&2; exit 1; }
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --port) PORT=${2:-}; shift 2 ;;
+    --version) VERSION=${2:-}; shift 2 ;;
+    --os) FORCE_OS=${2:-}; shift 2 ;;
+    --arch) FORCE_ARCH=${2:-}; shift 2 ;;
+    --no-service) NO_SERVICE=1; shift ;;
+    --dry-run) DRY_RUN=1; shift ;;
+    -h|--help) usage; exit 0 ;;
+    *) die "argumen tidak dikenal: $1 (pakai --help)" ;;
+  esac
+done
+
+# --- deteksi lingkungan -------------------------------------------------------
+
+detect_os() {
+  if [ -n "$FORCE_OS" ]; then printf '%s' "$FORCE_OS"; return; fi
+  local kernel
+  kernel=$(uname -s 2>/dev/null || echo unknown)
+  case "$kernel" in
+    Linux)
+      if [ -n "${PREFIX:-}" ] && printf '%s' "$PREFIX" | tr 'A-Z' 'a-z' | grep -q termux; then
+        printf 'termux'
+      elif [ -d /data/data/com.termux ]; then
+        printf 'termux'
+      else
+        printf 'linux'
+      fi
+      ;;
+    Darwin) printf 'macos' ;;
+    MINGW*|MSYS*|CYGWIN*|Windows_NT*|Windows*) printf 'windows' ;;
+    *)
+      # Bash di Windows melaporkan Windows_NT; OSTYPE menutup variasi lain.
+      case "${OSTYPE:-}" in
+        msys*|cygwin*|win32*) printf 'windows' ;;
+        darwin*) printf 'macos' ;;
+        linux*) printf 'linux' ;;
+        *) printf 'unknown' ;;
+      esac
+      ;;
+  esac
+}
+
+detect_arch() {
+  if [ -n "$FORCE_ARCH" ]; then printf '%s' "$FORCE_ARCH"; return; fi
+  local machine
+  machine=$(uname -m 2>/dev/null || echo unknown)
+  case "$machine" in
+    x86_64|amd64) printf 'amd64' ;;
+    aarch64|arm64) printf 'arm64' ;;
+    armv7l|armv7) printf 'armv7' ;;
+    *) printf 'unknown' ;;
+  esac
+}
+
+OS=$(detect_os)
+ARCH=$(detect_arch)
+
+case "$OS" in
+  linux|termux|macos|windows) ;;
+  *) die "sistem tidak dikenali. Dukungan: Linux, Termux, macOS, Windows (Git Bash/WSL). Pakai --os untuk memaksa." ;;
+esac
+case "$ARCH" in
+  amd64|arm64) ;;
+  armv7) die "armv7 tidak disediakan. Pakai arm64, atau build sendiri: cd receiver && GOARCH=arm go build ." ;;
+  *) die "arsitektur tidak dikenali: $(uname -m 2>/dev/null || echo '?'). Pakai --arch amd64|arm64." ;;
+esac
+
+# nama aset rilis: linux/termux memakai build linux, macOS memakai build darwin
+case "$OS" in
+  linux|termux) ASSET_OS="linux" ;;
+  macos) ASSET_OS="darwin" ;;
+  windows) ASSET_OS="windows" ;;
+esac
+ASSET_EXT=""
+[ "$ASSET_OS" = "windows" ] && ASSET_EXT=".exe"
+ASSET="pan-tempmail-${ASSET_OS}-${ARCH}${ASSET_EXT}"
+
+# Kombinasi yang benar-benar diterbitkan rilis; selain ini lebih baik berhenti sekarang.
+case "${ASSET_OS}-${ARCH}" in
+  linux-amd64|linux-arm64|darwin-amd64|darwin-arm64|windows-amd64) ;;
+  windows-*) die "rilis belum membangun Windows ${ARCH}; yang tersedia: windows amd64" ;;
+  *) die "kombinasi ${ASSET_OS}/${ARCH} tidak diterbitkan" ;;
+esac
+
+if [ "$VERSION" = "latest" ]; then
+  DOWNLOAD_BASE="${REL_BASE}/latest/download"
 else
-  BINARY=""
-  for candidate in ./tempmail-linux-amd64 ./tempmail-linux-arm64 ./tempmail; do
-    if [ -x "$candidate" ]; then BINARY=$candidate; break; fi
-  done
-  [ -n "$BINARY" ] || BINARY=./tempmail-linux-amd64
+  DOWNLOAD_BASE="${REL_BASE}/download/${VERSION}"
+fi
+BINARY_URL="${DOWNLOAD_BASE}/${ASSET}"
+CHECKSUM_URL="${DOWNLOAD_BASE}/pan-tempmail-checksums.txt"
+TARBALL_URL="${DOWNLOAD_BASE}/pan-tempmail.tar.gz"
+
+# --- porta --------------------------------------------------------------------
+
+valid_port() {
+  case "$1" in
+    ''|*[!0-9]*) return 1 ;;
+  esac
+  [ "$1" -ge 1 ] && [ "$1" -le 65535 ]
+}
+
+ask_port() {
+  local answer
+  if [ -n "$PORT" ]; then
+    valid_port "$PORT" || die "port tidak valid: $PORT (1-65535)"
+    return
+  fi
+  if [ -t 0 ]; then
+    printf 'Port aplikasi [%s]: ' "$DEFAULT_PORT"
+    read -r answer || answer=""
+    answer=${answer:-$DEFAULT_PORT}
+  else
+    answer=$DEFAULT_PORT
+  fi
+  valid_port "$answer" || die "port tidak valid: $answer (1-65535)"
+  PORT=$answer
+}
+
+# --- unduhan ------------------------------------------------------------------
+
+fetch() {
+  local url=$1 out=$2
+  if command -v curl >/dev/null 2>&1; then
+    curl -fsSL --retry 3 --max-time 300 "$url" -o "$out"
+  elif command -v wget >/dev/null 2>&1; then
+    wget -qO "$out" "$url"
+  else
+    die "butuh curl atau wget untuk mengunduh biner"
+  fi
+}
+
+sha256_of() {
+  if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1" | cut -d' ' -f1
+  elif command -v shasum >/dev/null 2>&1; then shasum -a 256 "$1" | cut -d' ' -f1
+  else printf ''; fi
+}
+
+verify_checksum() {
+  local file=$1 sums=$2 want got
+  [ -s "$sums" ] || return 0
+  want=$(awk -v name="$ASSET" '$2 == name { print $1 }' "$sums" | head -n1)
+  [ -n "$want" ] || { log "  checksum untuk $ASSET tidak ada di daftar, verifikasi dilewati"; return 0; }
+  got=$(sha256_of "$file")
+  if [ -z "$got" ]; then log "  sha256sum tidak tersedia, verifikasi dilewati"; return 0; fi
+  [ "$want" = "$got" ] || die "checksum tidak cocok untuk $ASSET (unduhan rusak atau dipalsukan)"
+  log "  checksum cocok"
+}
+
+is_root() { [ "$(id -u 2>/dev/null || echo 1)" = "0" ]; }
+
+has_systemd() {
+  [ -d /run/systemd/system ] && command -v systemctl >/dev/null 2>&1
+}
+
+PORT=$(printf '%s' "$PORT")
+ask_port
+
+# mode: server (systemd) atau portable
+MODE="portable"
+if [ "$OS" = "linux" ] && is_root && has_systemd && [ "$NO_SERVICE" = "0" ]; then
+  MODE="server"
 fi
 
-[ "$(id -u)" = 0 ] || { echo "Run as root"; exit 1; }
-[ -x "$BINARY" ] || { echo "Missing executable: $BINARY (pass the binary path: bash install.sh /path/to/tempmail-linux-amd64)"; exit 1; }
-[ -f "$REPO_ROOT/cloudflare-worker/src/index.js" ] || { echo "Missing cloudflare-worker source beside deployment package"; exit 1; }
+log ""
+log "${APP_NAME} installer"
+log "  sistem     : ${OS} (${ARCH})"
+log "  mode       : ${MODE}$([ "$MODE" = "server" ] && printf ' (systemd, root)' || printf ' (tanpa service adapter)')"
+log "  versi      : ${VERSION}"
+log "  port       : ${PORT}"
+log "  biner      : ${BINARY_URL}"
+[ "$MODE" = "server" ] && log "  skrip      : ${TARBALL_URL}"
+log ""
 
+if [ "$DRY_RUN" = "1" ]; then
+  if [ "$MODE" = "server" ]; then
+    log "dry-run: akan memasang"
+    log "  biner        -> ${ROOT}/tempmail"
+    log "  user/dirs    -> ${APP_USER}, ${ROOT}/data, ${ENV_DIR}"
+    log "  skrip+helper -> /usr/local/sbin/tempmailctl, /usr/local/bin/menutempmail, /usr/local/sbin/tempmail-root"
+    log "  unit         -> ${SERVICE}, tempmail-backup.timer, tempmail-root.path, tempmail-root.timer"
+    log "  env          -> ${ENV_DIR}/tempmail.env (PORT=${PORT}, rahasia dibuat aplikasi saat start)"
+    log "  cloudflared  -> dipasang bila belum ada"
+  else
+    log "dry-run: akan memasang biner ${ASSET} ke lokasi pengguna dan mencetak perintah menjalankan."
+    case "$OS" in
+      termux) log "  catatan: Termux tidak punya systemd; jalankan di foreground (atau lewat termux-services)" ;;
+      macos) log "  catatan: adapter launchd belum ada; jalankan di foreground" ;;
+      windows) log "  catatan: Windows Service belum ada; jalankan lewat PowerShell/CMD" ;;
+      linux) log "  catatan: bukan root atau tanpa systemd; jalankan di foreground" ;;
+    esac
+  fi
+  exit 0
+fi
+
+TMP_DIR=$(mktemp -d "${TMPDIR:-/tmp}/pan-tempmail.XXXXXX")
+cleanup() { rm -rf "$TMP_DIR"; }
+trap cleanup EXIT
+
+log "mengunduh biner ${ASSET} ..."
+fetch "$BINARY_URL" "${TMP_DIR}/${ASSET}"
+log "mengunduh daftar checksum ..."
+if ! fetch "$CHECKSUM_URL" "${TMP_DIR}/checksums.txt" 2>/dev/null; then
+  log "  daftar checksum tidak tersedia, verifikasi dilewati"
+  : > "${TMP_DIR}/checksums.txt"
+fi
+verify_checksum "${TMP_DIR}/${ASSET}" "${TMP_DIR}/checksums.txt"
+
+if [ "$MODE" = "portable" ]; then
+  case "$OS" in
+    windows)
+      DEST_DIR="${LOCALAPPDATA:-$HOME}/Pan-TempMail"
+      BIN_PATH="${DEST_DIR}/pan-tempmail.exe"
+      ENV_FILE="${DEST_DIR}/tempmail.env"
+      DATA_DIR="${DEST_DIR}/data"
+      RUN_CMD="\"${BIN_PATH}\""
+      ;;
+    termux)
+      DEST_DIR="${HOME}/pan-tempmail"
+      BIN_PATH="${DEST_DIR}/pan-tempmail"
+      ENV_FILE="${DEST_DIR}/tempmail.env"
+      DATA_DIR="${DEST_DIR}/data"
+      RUN_CMD="${BIN_PATH}"
+      ;;
+    *)
+      DEST_DIR="${HOME}/.local/bin"
+      BIN_PATH="${DEST_DIR}/pan-tempmail"
+      ENV_FILE="${HOME}/.config/pan-tempmail/tempmail.env"
+      DATA_DIR="${HOME}/.local/share/pan-tempmail/data"
+      RUN_CMD="${BIN_PATH}"
+      ;;
+  esac
+  mkdir -p "$DEST_DIR" "$DATA_DIR" "$(dirname "$ENV_FILE")"
+  install -m 0755 "${TMP_DIR}/${ASSET}" "$BIN_PATH" 2>/dev/null || { cp "${TMP_DIR}/${ASSET}" "$BIN_PATH"; chmod 755 "$BIN_PATH"; }
+
+  if [ ! -f "$ENV_FILE" ]; then
+    {
+      printf '# Pan-TempMail (portable install). Password admin tidak disimpan di sini.\n'
+      printf 'PORT=%s\n' "$PORT"
+      printf 'SITE_NAME=%s\n' "$SITE_NAME"
+      printf 'DB_PATH=%s/tempmail.db\n' "$DATA_DIR"
+      printf 'ATTACHMENTS_DIR=%s/attachments\n' "$DATA_DIR"
+      printf 'GIN_MODE=release\n'
+    } > "$ENV_FILE"
+    chmod 600 "$ENV_FILE"
+    log "env baru: ${ENV_FILE}"
+  else
+    log "env sudah ada, dibiarkan: ${ENV_FILE}"
+  fi
+
+  log ""
+  log "selesai. Biner: ${BIN_PATH}"
+  log "jalankan:"
+  log "  set -a; . \"${ENV_FILE}\"; set +a"
+  log "  ${RUN_CMD}"
+  log "lalu buka http://127.0.0.1:${PORT}/app/login.html untuk membuat admin pertama."
+  case "$OS" in
+    termux) log "Termux: jalankan di foreground, atau pakai termux-services bila ingin otomatis." ;;
+    macos) log "macOS: adapter launchd belum dibuat, jadi belum ada install sebagai service." ;;
+    windows) log "Windows: Windows Service belum dibuat; jalankan dari terminal." ;;
+  esac
+  log "akses dari HP lain di LAN: http://<ip-lan>:${PORT}/app/"
+  exit 0
+fi
+
+# --- mode server (Linux, root, systemd) ---------------------------------------
+
+[ "$(id -u)" = 0 ] || die "mode server butuh root"
+if ! command -v apt-get >/dev/null 2>&1; then
+  die "distro ini belum didukung otomatis (butuh apt). Pasang manual: sqlite3, ca-certificates, curl, python3, openssl"
+fi
+
+log "memasang paket sistem ..."
 apt-get update -qq
-apt-get install -y -qq sqlite3 ca-certificates curl python3 openssl
-id -u "$APP_USER" >/dev/null 2>&1 || useradd --system --home "$ROOT" --shell /usr/sbin/nologin "$APP_USER"
+apt-get install -y -qq sqlite3 ca-certificates curl python3 openssl >/dev/null
 
+log "menyiapkan user dan direktori ..."
+id -u "$APP_USER" >/dev/null 2>&1 || useradd --system --home "$ROOT" --shell /usr/sbin/nologin "$APP_USER"
 install -d -o "$APP_USER" -g "$APP_USER" -m 0750 "$ROOT/data"
 install -d -o "$APP_USER" -g "$APP_USER" -m 0750 "$ROOT/data/attachments" "$ROOT/backups" "$ROOT/worker" "$ENV_DIR"
-install -o root -g root -m 0755 "$BINARY" "$ROOT/tempmail"
-install -o root -g root -m 0755 "$SCRIPT_DIR/tempmailctl" /usr/local/sbin/tempmailctl
-install -o root -g root -m 0755 "$SCRIPT_DIR/menutempmail" /usr/local/bin/menutempmail
-install -o root -g root -m 0755 "$SCRIPT_DIR/setup.sh" "$ROOT/setup.sh"
-install -o root -g root -m 0644 "$SCRIPT_DIR/tempmail.service" /etc/systemd/system/tempmail.service
-install -o root -g root -m 0644 "$SCRIPT_DIR/tempmail-backup.service" /etc/systemd/system/tempmail-backup.service
-install -o root -g root -m 0644 "$SCRIPT_DIR/tempmail-backup.timer" /etc/systemd/system/tempmail-backup.timer
 
-# Root helper: the app stays unprivileged and only writes validated requests into the spool.
-install -o root -g root -m 0755 "$SCRIPT_DIR/tempmail-root" /usr/local/sbin/tempmail-root
-install -o root -g root -m 0644 "$SCRIPT_DIR/tempmail-root.service" /etc/systemd/system/tempmail-root.service
-install -o root -g root -m 0644 "$SCRIPT_DIR/tempmail-root.path" /etc/systemd/system/tempmail-root.path
-install -o root -g root -m 0644 "$SCRIPT_DIR/tempmail-root.timer" /etc/systemd/system/tempmail-root.timer
+log "mengunduh skrip pendukung (tarball) ..."
+fetch "$TARBALL_URL" "${TMP_DIR}/pan-tempmail.tar.gz"
+mkdir -p "${TMP_DIR}/src"
+tar -xzf "${TMP_DIR}/pan-tempmail.tar.gz" -C "${TMP_DIR}/src"
+SRC_DIR="${TMP_DIR}/src"
+[ -d "${SRC_DIR}/deploy/linux" ] || die "tarball rilis tidak memuat deploy/linux"
+SOURCE_DIR="${SRC_DIR}/deploy/linux"
+WORKER_DIR="${SRC_DIR}/cloudflare-worker"
+
+install -o root -g root -m 0755 "${TMP_DIR}/${ASSET}" "$ROOT/tempmail"
+install -o root -g root -m 0755 "$SOURCE_DIR/tempmailctl" /usr/local/sbin/tempmailctl
+install -o root -g root -m 0755 "$SOURCE_DIR/menutempmail" /usr/local/bin/menutempmail
+install -o root -g root -m 0755 "$SOURCE_DIR/setup.sh" "$ROOT/setup.sh"
+install -o root -g root -m 0644 "$SOURCE_DIR/tempmail.service" /etc/systemd/system/tempmail.service
+install -o root -g root -m 0644 "$SOURCE_DIR/tempmail-backup.service" /etc/systemd/system/tempmail-backup.service
+install -o root -g root -m 0644 "$SOURCE_DIR/tempmail-backup.timer" /etc/systemd/system/tempmail-backup.timer
+install -o root -g root -m 0755 "$SOURCE_DIR/tempmail-root" /usr/local/sbin/tempmail-root
+install -o root -g root -m 0644 "$SOURCE_DIR/tempmail-root.service" /etc/systemd/system/tempmail-root.service
+install -o root -g root -m 0644 "$SOURCE_DIR/tempmail-root.path" /etc/systemd/system/tempmail-root.path
+install -o root -g root -m 0644 "$SOURCE_DIR/tempmail-root.timer" /etc/systemd/system/tempmail-root.timer
 install -d -o "$APP_USER" -g "$APP_USER" -m 0750 "$ROOT/data/helper" "$ROOT/data/helper/in" "$ROOT/data/helper/out"
 install -d -o root -g root -m 0700 "$ROOT/data/helper/state"
 
-cp -a "$REPO_ROOT/cloudflare-worker/." "$ROOT/worker/"
-chown -R root:root "$ROOT/worker"
+if [ -d "$WORKER_DIR" ]; then
+  cp -a "$WORKER_DIR/." "$ROOT/worker/"
+  chown -R root:root "$ROOT/worker"
+fi
 
 if [ ! -f "$ENV_DIR/tempmail.env" ]; then
-  cat >"$ENV_DIR/tempmail.env" <<EOF
-DB_DRIVER=sqlite
-DB_PATH=$ROOT/data/tempmail.db
-PORT=8080
-SMTP_HOST=127.0.0.1
-SMTP_PORT=2525
-DOMAINS=local.invalid
-SITE_NAME=Pan-TempMail
-CORS_ORIGINS=
-CLEANUP_INTERVAL=1h
-MESSAGE_RETENTION=24h
-ATTACHMENTS_DIR=$ROOT/data/attachments
-GIN_MODE=release
-JWT_SECRET=$(openssl rand -hex 32)
-EMAIL_API_KEY=$(openssl rand -hex 32)
-CLOUDFLARE_API_BASE=https://api.cloudflare.com/client/v4
-CF_WORKER_NAME=tempmailbyjhopanstore
-CF_WORKER_COMPAT_DATE=2024-01-01
-CF_TUNNEL_NAME=tempmailbyjhopanstore
-EOF
+  {
+    printf 'DB_DRIVER=sqlite\n'
+    printf 'DB_PATH=%s/data/tempmail.db\n' "$ROOT"
+    printf 'PORT=%s\n' "$PORT"
+    printf 'SMTP_HOST=127.0.0.1\n'
+    printf 'SMTP_PORT=2525\n'
+    printf 'DOMAINS=local.invalid\n'
+    printf 'SITE_NAME=%s\n' "$SITE_NAME"
+    printf 'CORS_ORIGINS=\n'
+    printf 'CLEANUP_INTERVAL=1h\n'
+    printf 'MESSAGE_RETENTION=24h\n'
+    printf 'ATTACHMENTS_DIR=%s/data/attachments\n' "$ROOT"
+    printf 'GIN_MODE=release\n'
+    printf 'CLOUDFLARE_API_BASE=https://api.cloudflare.com/client/v4\n'
+    printf 'CF_WORKER_NAME=tempmailbyjhopanstore\n'
+    printf 'CF_WORKER_COMPAT_DATE=2024-01-01\n'
+    printf 'CF_TUNNEL_NAME=tempmailbyjhopanstore\n'
+    printf '# JWT_SECRET dan EMAIL_API_KEY sengaja kosong: aplikasi membuatnya sekali\n'
+    printf '# secara acak ke %s/data/secrets.env (0600) saat start pertama.\n' "$ROOT"
+  } > "$ENV_DIR/tempmail.env"
   chown root:"$APP_USER" "$ENV_DIR/tempmail.env"
   chmod 640 "$ENV_DIR/tempmail.env"
+  log "env baru: ${ENV_DIR}/tempmail.env (PORT=${PORT})"
+else
+  log "env sudah ada, dibiarkan: ${ENV_DIR}/tempmail.env"
 fi
 
 if ! command -v cloudflared >/dev/null 2>&1; then
-  arch=$(dpkg --print-architecture)
-  case "$arch" in
-    arm64) package=cloudflared-linux-arm64.deb ;;
-    amd64) package=cloudflared-linux-amd64.deb ;;
-    *) echo "Unsupported architecture for automatic cloudflared install: $arch"; exit 1 ;;
+  case "$ARCH" in
+    amd64) CF_PKG="cloudflared-linux-amd64.deb" ;;
+    arm64) CF_PKG="cloudflared-linux-arm64.deb" ;;
   esac
-  curl -fsSL "https://github.com/cloudflare/cloudflared/releases/latest/download/$package" -o /tmp/cloudflared.deb
-  dpkg -i /tmp/cloudflared.deb
-  rm -f /tmp/cloudflared.deb
+  log "memasang cloudflared (${CF_PKG}) ..."
+  if fetch "https://github.com/cloudflare/cloudflared/releases/latest/download/${CF_PKG}" "${TMP_DIR}/cloudflared.deb"; then
+    dpkg -i "${TMP_DIR}/cloudflared.deb" >/dev/null || log "  dpkg gagal; pasang nanti dari panel Server"
+  else
+    log "  unduhan cloudflared gagal; pasang nanti dari panel Server"
+  fi
 fi
 
 systemctl daemon-reload
-systemctl enable --now tempmail.service tempmail-backup.timer
-systemctl enable --now tempmail-root.path tempmail-root.timer
-APP_PORT=$(grep '^PORT=' "$ENV_DIR/tempmail.env" | cut -d= -f2)
-APP_PORT=${APP_PORT:-8080}
-curl -fsS "http://127.0.0.1:$APP_PORT/health"
-printf '\nReady. LAN UI: http://<device-lan-ip>:%s/app/\n' "$APP_PORT"
-printf 'Run sudo tempmailctl for guided Cloudflare/Tunnel/Worker setup.\n'
-printf 'Buat admin pertama di browser: http://127.0.0.1:%s/app/login.html (form "Buat admin pertama").\n' "$APP_PORT"
-printf 'Panel admin (/app/admin.html -> Server) bisa restart service, backup, log, dan tunnel.\n'
-printf 'Helper root: tempmail-root.path + tempmail-root.timer, spool %s/data/helper/in\n' "$ROOT"
+systemctl enable --now "$SERVICE" tempmail-backup.timer tempmail-root.path tempmail-root.timer
+
+for _ in $(seq 1 15); do
+  if curl -fsS "http://127.0.0.1:${PORT}/health" >/dev/null 2>&1; then break; fi
+  sleep 1
+done
+if curl -fsS "http://127.0.0.1:${PORT}/health" >/dev/null 2>&1; then
+  log "health check: OK"
+else
+  log "health check belum menjawab; cek: systemctl status ${SERVICE} --no-pager"
+fi
+
+log ""
+log "selesai. Langkah berikutnya di browser:"
+log "  1. http://<ip-lan>:${PORT}/app/login.html  -> buat admin pertama"
+log "  2. http://<ip-lan>:${PORT}/admin           -> Setup: API token Cloudflare, tunnel, domain"
+log "menu server: sudo menutempmail   (opsi 3 untuk menempel API token profil)"

@@ -1,5 +1,5 @@
 # ==========================================
-# TempMail Ultra-Light — Docker Compose
+# Pan-TempMail - Docker Compose
 # Single container, ~35MB RAM usage
 # ==========================================
 
@@ -24,7 +24,7 @@ services:
 
       # --- Domains (comma-separated) ---
       DOMAINS: ${DOMAINS:-example.com}
-      SITE_NAME: ${SITE_NAME:-TempMail}
+      SITE_NAME: ${SITE_NAME:-Pan-TempMail}
 
       # --- CORS (comma-separated, empty = same-origin only) ---
       CORS_ORIGINS: ${CORS_ORIGINS:-}

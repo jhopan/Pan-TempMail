@@ -447,7 +447,7 @@ func TestSetDomainRoutingWritesCatchAllAndListsDomain(t *testing.T) {
 	}
 	expected := map[string]any{
 		"enabled": true,
-		"name":    "TempMail catch-all",
+		"name":    "Pan-TempMail catch-all",
 		"matchers": []any{
 			map[string]any{"type": "all"},
 		},

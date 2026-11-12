@@ -210,7 +210,7 @@ type catchAllAction struct {
 func (c *Client) SetCatchAll(zoneID, workerName string, enabled bool) error {
 	payload := catchAllRequest{
 		Enabled:  enabled,
-		Name:     "TempMail catch-all",
+		Name:     "Pan-TempMail catch-all",
 		Matchers: []catchAllMatch{{Type: "all"}},
 		Actions:  []catchAllAction{{Type: "worker", Value: []string{workerName}}},
 	}

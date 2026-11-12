@@ -229,7 +229,7 @@ func TestSetCatchAll(t *testing.T) {
 		if cap.method != http.MethodPut || cap.path != "/zones/zone-1/email/routing/rules/catch_all" {
 			t.Fatalf("request = %s %s", cap.method, cap.path)
 		}
-		want := `{"enabled":true,"name":"TempMail catch-all","matchers":[{"type":"all"}],"actions":[{"type":"worker","value":["tempmailbyjhopanstore"]}]}`
+		want := `{"enabled":true,"name":"Pan-TempMail catch-all","matchers":[{"type":"all"}],"actions":[{"type":"worker","value":["tempmailbyjhopanstore"]}]}`
 		if string(cap.body) != want {
 			t.Fatalf("body =\n%s\nwant\n%s", cap.body, want)
 		}
@@ -241,7 +241,7 @@ func TestSetCatchAll(t *testing.T) {
 		if err := client.SetCatchAll("zone-1", "tempmailbyjhopanstore", false); err != nil {
 			t.Fatalf("SetCatchAll: %v", err)
 		}
-		want := `{"enabled":false,"name":"TempMail catch-all","matchers":[{"type":"all"}],"actions":[{"type":"worker","value":["tempmailbyjhopanstore"]}]}`
+		want := `{"enabled":false,"name":"Pan-TempMail catch-all","matchers":[{"type":"all"}],"actions":[{"type":"worker","value":["tempmailbyjhopanstore"]}]}`
 		if string(cap.body) != want {
 			t.Fatalf("body =\n%s\nwant\n%s", cap.body, want)
 		}

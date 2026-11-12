@@ -71,8 +71,10 @@ Pages cannot receive email events. Our Worker is a 72-line courier — reads ema
 On a fresh Debian/Ubuntu machine:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/jhopan/Pan-TempMail/main/deploy/linux/quick-setup.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/jhopan/Pan-TempMail/main/deploy/linux/install.sh | sudo bash
 ```
+
+(`quick-setup.sh` di URL lama tetap ada dan sekarang hanya meneruskan ke `install.sh`.)
 
 This will:
 1. ⬇️ Download binary from GitHub Releases
@@ -93,10 +95,61 @@ Menu alternative: `menutempmail → 8` (SETUP GUIDED).
 
 ### Step 1: Download binary
 
+Two ways. The installer does detection and download for you:
+
+```bash
+curl -fsSLO https://raw.githubusercontent.com/jhopan/Pan-TempMail/main/deploy/linux/install.sh
+sudo bash install.sh            # Linux root: service install. Elsewhere: portable install.
+```
+
+Installer behaviour:
+
+| Detected | Mode | What it does |
+|---|---|---|
+| Linux + root + systemd | server | `/opt/tempmail`, systemd units, root helper, cloudflared, env with the port you type |
+| Linux + root + `--no-service` | portable | binary + env file, prints the run command |
+| Termux (Android) | portable | binary in `~/pan-tempmail`, foreground run (no systemd); Termux uses the Linux ARM64 build |
+| macOS | portable | binary in `~/.local/bin`; launchd adapter not implemented yet, so no service |
+| Windows (Git Bash, WSL, MSYS) | portable | `.exe` in `%LOCALAPPDATA%\Pan-TempMail`; Windows Service not implemented yet |
+
+It asks for the port (`8080` default, `--port N` to skip), validates it, downloads
+`pan-tempmail-<os>-<arch>` from the latest release, verifies it against the release checksums when
+`sha256sum`/`shasum` exists, and never overwrites an existing env file.
+
+Manual download, latest build:
+
 ```bash
 wget https://github.com/jhopan/Pan-TempMail/releases/latest/download/pan-tempmail-linux-amd64 -O /tmp/tempmail
 chmod +x /tmp/tempmail
 ```
+
+### Step 1b: Download a specific version
+
+Every release carries the versioned copy next to the stable alias, so pinning a version is explicit:
+
+```bash
+# pick a tag from the releases page (or: gh release list)
+TAG=v1.1.0
+wget "https://github.com/jhopan/Pan-TempMail/releases/download/${TAG}/pan-tempmail-${TAG}-linux-amd64" -O /tmp/tempmail
+chmod +x /tmp/tempmail
+
+# verify it against that tag's checksums
+wget "https://github.com/jhopan/Pan-TempMail/releases/download/${TAG}/pan-tempmail-${TAG}-checksums.txt"
+sha256sum -c "pan-tempmail-${TAG}-checksums.txt" --ignore-missing
+```
+
+The installer can pin a version too: `sudo bash install.sh --version v1.1.0`.
+
+| Platform | Asset |
+|---|---|
+| Linux x86_64 | `pan-tempmail-linux-amd64` |
+| Linux ARM64 (Raspberry Pi, most phones under Termux) | `pan-tempmail-linux-arm64` |
+| macOS Intel | `pan-tempmail-darwin-amd64` |
+| macOS Apple Silicon | `pan-tempmail-darwin-arm64` |
+| Windows x86_64 | `pan-tempmail-windows-amd64.exe` |
+
+Older versions stay downloadable at `/releases/download/<tag>/...`; `/releases/latest/download/...`
+always serves the newest release.
 
 ### Step 2: Clone repo
 
@@ -436,12 +489,14 @@ GitHub Actions publishes two sets of assets per release:
 | Target | Latest alias (stable name) | Versioned copy |
 |---|---|---|
 | Linux x86_64 | `pan-tempmail-linux-amd64` | `pan-tempmail-v1.0.0-linux-amd64` |
-| Linux ARM64 | `pan-tempmail-linux-arm64` | `pan-tempmail-v1.0.0-linux-arm64` |
+| Linux ARM64 (Termux too) | `pan-tempmail-linux-arm64` | `pan-tempmail-v1.0.0-linux-arm64` |
+| macOS Intel | `pan-tempmail-darwin-amd64` | `pan-tempmail-v1.0.0-darwin-amd64` |
+| macOS Apple Silicon | `pan-tempmail-darwin-arm64` | `pan-tempmail-v1.0.0-darwin-arm64` |
 | Windows x86_64 | `pan-tempmail-windows-amd64.exe` | `pan-tempmail-v1.0.0-windows-amd64.exe` |
 
-Plus `pan-tempmail-checksums.txt`, `pan-tempmail-v1.0.0-checksums.txt`, and a source tarball
-`pan-tempmail-v1.0.0.tar.gz` (scripts, worker, docs). The stable names are republished in every
-release, so this URL always downloads the newest build:
+Plus `pan-tempmail-checksums.txt`, `pan-tempmail-v1.0.0-checksums.txt`, and two source tarballs:
+`pan-tempmail.tar.gz` (stable, what the installer fetches) and `pan-tempmail-v1.0.0.tar.gz`. The
+stable names are republished in every release, so this URL always downloads the newest build:
 
 ```bash
 wget https://github.com/jhopan/Pan-TempMail/releases/latest/download/pan-tempmail-linux-amd64

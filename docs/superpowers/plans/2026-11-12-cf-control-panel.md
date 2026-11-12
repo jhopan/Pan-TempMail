@@ -176,7 +176,7 @@ Aturan: respons TIDAK PERNAH memuat token (`has_token` boolean saja). Pesan erro
 
 **Files:** Create `receiver/cloudflare/client.go`, `receiver/cloudflare/errors.go`, `receiver/cloudflare/secret.go`, `receiver/cloudflare/client_test.go`, `receiver/cloudflare/secret_test.go`.
 
-- [ ] Test dulu (`httptest` stub + `NewClientWithBase`): envelope sukses, `success=false` → `*APIError` dengan `Codes`/`Messages`, `ZoneID` → `ErrZoneNotFound` saat kosong atau status `pending`, body `catch_all` persis `{"enabled":true,"name":"TempMail catch-all","matchers":[{"type":"all"}],"actions":[{"type":"worker","value":["tempmailbyjhopanstore"]}]}`, multipart `DeployWorker` memuat metadata `main_module=index.js` + `compatibility_date` + bindings, `SealSecret`/`OpenSecret` round-trip dan passthrough tanpa prefix.
+- [ ] Test dulu (`httptest` stub + `NewClientWithBase`): envelope sukses, `success=false` → `*APIError` dengan `Codes`/`Messages`, `ZoneID` → `ErrZoneNotFound` saat kosong atau status `pending`, body `catch_all` persis `{"enabled":true,"name":"Pan-TempMail catch-all","matchers":[{"type":"all"}],"actions":[{"type":"worker","value":["tempmailbyjhopanstore"]}]}`, multipart `DeployWorker` memuat metadata `main_module=index.js` + `compatibility_date` + bindings, `SealSecret`/`OpenSecret` round-trip dan passthrough tanpa prefix.
 - [ ] Implementasi sampai test hijau.
 - [ ] `cd receiver && gofmt -l . && go test ./cloudflare/... && go vet ./cloudflare/...`
 

@@ -26,6 +26,10 @@ jobs:
             goarch: amd64
           - goos: linux
             goarch: arm64
+          - goos: darwin
+            goarch: amd64
+          - goos: darwin
+            goarch: arm64
           - goos: windows
             goarch: amd64
     env:
@@ -79,12 +83,20 @@ jobs:
           merge-multiple: true
 
       - name: Source tarball
-        run: tar czf "pan-tempmail-${VERSION}.tar.gz" deploy cloudflare-worker .env.example README.md docs
+        run: |
+          tar czf "pan-tempmail-${VERSION}.tar.gz" deploy cloudflare-worker .env.example README.md docs
+          # Nama stabil: dipakai installer untuk mengunduh skrip tanpa tahu versinya.
+          cp "pan-tempmail-${VERSION}.tar.gz" pan-tempmail.tar.gz
 
       - name: Checksums
         run: |
-          sha256sum pan-tempmail-linux-amd64 pan-tempmail-linux-arm64 pan-tempmail-windows-amd64.exe > pan-tempmail-checksums.txt
-          sha256sum "pan-tempmail-${VERSION}-linux-amd64" "pan-tempmail-${VERSION}-linux-arm64" "pan-tempmail-${VERSION}-windows-amd64.exe" > "pan-tempmail-${VERSION}-checksums.txt"
+          stable="pan-tempmail-linux-amd64 pan-tempmail-linux-arm64 pan-tempmail-darwin-amd64 pan-tempmail-darwin-arm64 pan-tempmail-windows-amd64.exe"
+          versioned=""
+          for name in $stable; do
+            versioned="$versioned ${name/pan-tempmail-/pan-tempmail-${VERSION}-}"
+          done
+          sha256sum $stable > pan-tempmail-checksums.txt
+          sha256sum $versioned > "pan-tempmail-${VERSION}-checksums.txt"
 
       - name: Publish release
         uses: softprops/action-gh-release@v2
@@ -98,27 +110,41 @@ jobs:
             | --- | --- | --- |
             | Linux x86_64 | `pan-tempmail-linux-amd64` | `pan-tempmail-${{ env.VERSION }}-linux-amd64` |
             | Linux ARM64 | `pan-tempmail-linux-arm64` | `pan-tempmail-${{ env.VERSION }}-linux-arm64` |
+            | macOS Intel | `pan-tempmail-darwin-amd64` | `pan-tempmail-${{ env.VERSION }}-darwin-amd64` |
+            | macOS Apple Silicon | `pan-tempmail-darwin-arm64` | `pan-tempmail-${{ env.VERSION }}-darwin-arm64` |
             | Windows x86_64 | `pan-tempmail-windows-amd64.exe` | `pan-tempmail-${{ env.VERSION }}-windows-amd64.exe` |
+
+            Termux uses the Linux ARM64 build. macOS and Windows run in portable mode: the service
+            adapters (launchd, Windows Service) are not implemented, so the installer prints the
+            command to run instead of installing a service.
 
             The stable asset names are republished in every release, so
             https://github.com/jhopan/Pan-TempMail/releases/latest/download/pan-tempmail-linux-amd64
             always points at the newest build. The versioned copies and the checksums stay pinned to this tag.
 
             ```bash
-            curl -LO https://github.com/jhopan/Pan-TempMail/releases/download/${{ env.VERSION }}/pan-tempmail-linux-amd64
-            sudo bash deploy/linux/install.sh /path/to/pan-tempmail-linux-amd64
+            curl -fsSLO https://raw.githubusercontent.com/jhopan/Pan-TempMail/main/deploy/linux/install.sh
+            sudo bash install.sh          # deteksi OS/arch, unduh biner latest, tanya port
             ```
 
-            After the install, open the printed URL and create the first admin account, then open `/admin` to set up Cloudflare.
+            The installer detects Linux, Termux, macOS, or a Windows shell, downloads this release,
+            asks for the port, and installs a systemd service on Linux (root) or a portable copy
+            elsewhere. After it finishes, open the printed URL to create the first admin, then
+            `/admin` to set up Cloudflare.
 
             Credit JhopanStore
           files: |
             pan-tempmail-linux-amd64
             pan-tempmail-linux-arm64
+            pan-tempmail-darwin-amd64
+            pan-tempmail-darwin-arm64
             pan-tempmail-windows-amd64.exe
             pan-tempmail-${{ env.VERSION }}-linux-amd64
             pan-tempmail-${{ env.VERSION }}-linux-arm64
+            pan-tempmail-${{ env.VERSION }}-darwin-amd64
+            pan-tempmail-${{ env.VERSION }}-darwin-arm64
             pan-tempmail-${{ env.VERSION }}-windows-amd64.exe
             pan-tempmail-checksums.txt
             pan-tempmail-${{ env.VERSION }}-checksums.txt
+            pan-tempmail.tar.gz
             pan-tempmail-${{ env.VERSION }}.tar.gz

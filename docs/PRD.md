@@ -9,7 +9,7 @@ Self-hosted, ultra-light temporary email platform for manual use and legitimate 
 - Single Go binary with embedded web UI and SQLite.
 - Low resource baseline: target <100MB RAM including tunnel process on Linux.
 - One instance supports many temp-mail domains.
-- Multiple Cloudflare accounts/profiles may contribute domains to one TempMail instance.
+- Multiple Cloudflare accounts/profiles may contribute domains to one Pan-TempMail instance.
 - Per-domain catch-all routing: `anything@domain.example` reaches its own inbox.
 - Automation API can create an inbox and wait for a message without client polling.
 - Extract common OTP codes and links from received mail.
@@ -59,7 +59,7 @@ Use only when public inbound port 25 is known to work. On Armbian default instal
 ### 5.3 Optional email copy
 
 ```text
-Worker → TempMail always
+Worker → Pan-TempMail always
 Worker → configured destination(s) only when owner explicitly enables copies
 ```
 
@@ -67,7 +67,7 @@ Empty destination list means OFF. A copy destination must be verified by Cloudfl
 
 ## 6. Functional requirements
 
-### TempMail app
+### Pan-TempMail app
 
 - `GET /api/setup` reports `needs_setup` (whether the users table is empty) so the login page can show the create-admin form.
 - `POST /api/setup` creates first admin only when no users exist.
@@ -83,7 +83,7 @@ Empty destination list means OFF. A copy destination must be verified by Cloudfl
 - Display dashboard before choices.
 - Show OS/CPU, app health, memory, domain list, inbox/message count, backup status, Cloudflare profiles, tunnel, Worker state, routing state, optional copies.
 - Add/select/remove Cloudflare profiles safely.
-- Add/remove TempMail domains safely.
+- Add/remove Pan-TempMail domains safely.
 - Domain removal from menu never deletes Cloudflare zone/DNS/routing by default.
 - Support worker deploy and routing enable per active profile/domain.
 
@@ -133,7 +133,7 @@ Empty destination list means OFF. A copy destination must be verified by Cloudfl
 - SQLite WAL enabled.
 - Daily SQLite backups retained seven days.
 - Cloudflare Tunnel reconnects via service.
-- Email copy is not assumed as primary storage; TempMail must report delivery failures in Worker logs.
+- Email copy is not assumed as primary storage; Pan-TempMail must report delivery failures in Worker logs.
 
 ## 9. Success criteria
 
@@ -142,7 +142,7 @@ Empty destination list means OFF. A copy destination must be verified by Cloudfl
 - Local SMTP or HTTP Worker simulation stores a message.
 - OTP/link extraction succeeds for test message.
 - `menutempmail` shows accurate dashboard state.
-- A domain from CF A and a domain from CF B can route to the same TempMail instance after their respective Worker/routing setup.
+- A domain from CF A and a domain from CF B can route to the same Pan-TempMail instance after their respective Worker/routing setup.
 - A domain in a second Cloudflare account can be added, Worker-deployed for that profile, and routed through the panel alone, with the readiness checklist showing the real Cloudflare state at each step.
 - The panel `Setup` checklist drives a first install end to end: helper, profile, tunnel plus web-host CNAME, domain plus Worker/routing/Email DNS, and a receiving test inbox.
 - The admin panel (`/admin`) can add a Cloudflare profile, add a domain, deploy the Worker, and enable routing, with Cloudflare errors shown verbatim.

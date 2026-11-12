@@ -13,7 +13,7 @@ Sender → CF Email Routing → Profile Worker ──────┼────
                                                   │              │
                                                   └──────────────┘
                                                                  ▼
-                                                        TempMail Go binary
+                                                        Pan-TempMail Go binary
                                                         HTTP :8080
                                                         SMTP :2525 local test
                                                                  │
@@ -117,11 +117,11 @@ Domain list for the web UI comes from `cf_domains` (`enabled` and `routing` set)
 ```text
 Profile CF A (stored in SQLite, token encrypted)
   API token A + account ID A
-  domain-a.example → Worker A → shared tunnel URL → TempMail
+  domain-a.example → Worker A → shared tunnel URL → Pan-TempMail
 
 Profile CF B
   API token B + account ID B
-  domain-b.example → Worker B → shared tunnel URL → TempMail
+  domain-b.example → Worker B → shared tunnel URL → Pan-TempMail
 ```
 
 Each domain is bound to one profile. Workers are deployed per profile through the Cloudflare REST API
@@ -137,7 +137,7 @@ tunnel connector all need root on the host, so those live in a separate root com
 can only *ask*, never command.
 
 ```text
-TempMail app (User=tempmail, NoNewPrivileges=true, ProtectSystem=full, RW only /opt/tempmail/data)
+Pan-TempMail app (User=tempmail, NoNewPrivileges=true, ProtectSystem=full, RW only /opt/tempmail/data)
   writes  /opt/tempmail/data/helper/in/<id>.json        request, 0640, tempmail:tempmail
         │
 tempmail-root.path  (DirectoryNotEmpty -> starts the service)
@@ -148,7 +148,7 @@ tempmail-root.timer (retry every 30s, safety net)
   execute:  systemctl / journalctl / cloudflared / curl / dpkg, argument list only, never a shell
   write     /opt/tempmail/data/helper/out/<id>.json      result, 0640, root:tempmail
         ▼
-TempMail app reads the result, deletes it, returns it to the admin panel
+Pan-TempMail app reads the result, deletes it, returns it to the admin panel
 ```
 
 Rules that keep this safe:

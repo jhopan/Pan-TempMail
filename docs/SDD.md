@@ -20,11 +20,11 @@ Rollback
 Example:
 
 ```text
-Goal: add a Cloudflare profile CF B with a domain that reaches existing Armbian TempMail.
+Goal: add a Cloudflare profile CF B with a domain that reaches existing Armbian Pan-TempMail.
 Non-goal: create a second tunnel or delete any DNS zone.
 Affected: /etc/tempmail/cloudflare-state.json, Worker B, Email Routing B.
 Verify: Worker B delivery to HTTP endpoint stores recipient under domain B.
-Rollback: disable catch-all B; remove domain B from TempMail menu. Do not delete zone.
+Rollback: disable catch-all B; remove domain B from Pan-TempMail menu. Do not delete zone.
 ```
 
 ## 2. Choose smallest vertical slice
@@ -38,7 +38,7 @@ Right: add profile → add one domain → deploy Worker for profile → route on
 
 ## 3. Implementation constraints
 
-- Reuse one Armbian TempMail instance and one tunnel unless a real isolation requirement exists.
+- Reuse one Armbian Pan-TempMail instance and one tunnel unless a real isolation requirement exists.
 - Cloudflare profiles remain separate: their account IDs/tokens/Workers/routing must not mix.
 - Never persist an API token in Git; host state file is root-only.
 - Do not turn optional email copies on during unrelated deployment work.

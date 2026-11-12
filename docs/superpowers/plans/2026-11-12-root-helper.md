@@ -69,6 +69,6 @@ Fire-and-forget = handler HTTP membalas `status: "accepted"` setelah request dit
 ```json
 {"helper":{"installed":true,"dir":"/opt/tempmail/data/helper","pending":0},
  "db":{"path":"...db","bytes":40960,"inboxes":2,"messages":5,"attachments":0},
- "app":{"uptime_seconds":320,"rss_bytes":15728640,"go_version":"go1.25.0","site_name":"TempMail","port":"8081"},
+ "app":{"uptime_seconds":320,"rss_bytes":15728640,"go_version":"go1.25.0","site_name":"Pan-TempMail","port":"8081"},
  "cloudflare":{"profiles":2,"domains":3,"active_profile":"cf-a","worker_name":"tempmailbyjhopanstore"}}
 ```

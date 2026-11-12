@@ -1,6 +1,6 @@
 # Pan-TempMail — API Documentation
 
-Complete guide for using TempMail automation API.
+Complete guide for using Pan-TempMail automation API.
 
 ## Base Info
 
@@ -457,7 +457,7 @@ shows the real reason instead of a silent failure.
 - DNS writes are additive only: `POST /tunnel/cname` and the `cname`/`email_dns` parts of `POST /domains/{domain}/fix` create what is missing. No endpoint deletes DNS records.
 - `routing:true` enables Email Routing, then sets the catch-all to the Worker. `routing:false` disables the catch-all only.
 - (1) `unlock_dns:true` is **destructive and off by default**: Cloudflare documents `DELETE /zones/{id}/email/routing/dns` as *"Disable your Email Routing zone. Also removes additional MX records previously required for Email Routing to work."* Mail for that domain stops until the Email Routing records exist again, which `POST /domains/{domain}/fix` with `email_dns:true` can restore. The panel labels it "matikan CF" and asks for confirmation; the setup scripts never send it.
-- Deleting a domain removes it from TempMail only; Cloudflare DNS, zone, and routing stay untouched.
+- Deleting a domain removes it from Pan-TempMail only; Cloudflare DNS, zone, and routing stay untouched.
 - `deploy-worker` uploads the embedded Worker script and sets `TEMPMAIL_SERVER_URL`, `TEMPMAIL_API_KEY`, and `FORWARD_LIST` as Worker secrets. No `wrangler` or Node.js is needed on the host.
 - API tokens are stored encrypted (AES-256-GCM, key derived from `JWT_SECRET`) and are never returned by any endpoint. Rotating `JWT_SECRET` invalidates stored tokens, so re-enter them after a rotation.
 - `tunnel/create` returns the connector token and the root commands to install `cloudflared`; the app never writes `/etc/cloudflared` or restarts the tunnel service itself.
@@ -549,7 +549,7 @@ Status shape:
 {"helper":{"installed":true,"dir":"/opt/tempmail/data/helper","pending":0},
  "db":{"path":"/opt/tempmail/data/tempmail.db","bytes":40960,"inboxes":2,"messages":5,"attachments":0,
        "series":[0,0,1,0,2,...],"series_peak":2,"series_window_hours":24,"series_capped":false},
- "app":{"uptime_seconds":320,"rss_bytes":15728640,"go_version":"go1.25.0","site_name":"TempMail","port":"8081"},
+ "app":{"uptime_seconds":320,"rss_bytes":15728640,"go_version":"go1.25.0","site_name":"Pan-TempMail","port":"8081"},
  "cloudflare":{"profiles":2,"domains":3,"active_profile":"cf-a","worker_name":"tempmailbyjhopanstore"}}
 ```
 
@@ -748,7 +748,7 @@ Common errors:
 
 ## Email Data Extraction
 
-TempMail automatically extracts from email body:
+Pan-TempMail automatically extracts from email body:
 
 | Type | What it finds | Example |
 |---|---|---|

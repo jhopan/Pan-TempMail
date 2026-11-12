@@ -100,7 +100,7 @@ from email.mime.text import MIMEText
 m = MIMEText('Code: 593817. Verify: https://example.invalid/verify?token=test')
 m['From'] = 'sender@test.invalid'
 m['To'] = 'armbian-check@local.invalid'
-m['Subject'] = 'TempMail test'
+m['Subject'] = 'Pan-TempMail test'
 s = smtplib.SMTP('127.0.0.1', 2525, timeout=10)
 s.sendmail(m['From'], [m['To']], m.as_string())
 s.quit()
@@ -129,7 +129,7 @@ Command line (`menutempmail`):
 4. `5` select profile, deploy Worker for it.
 5. `6` activate routing for one domain.
 6. Send test email to `random@that-domain`.
-7. Verify Worker delivery to TempMail.
+7. Verify Worker delivery to Pan-TempMail.
 8. Repeat profile/domain flow for CF B, CF C as needed.
 
 Existing installs: `menutempmail → 1 → 4` (or the panel's Import card) loads the old
@@ -213,12 +213,12 @@ python3 -c "import bcrypt,sqlite3; db=sqlite3.connect('/opt/tempmail/data/tempma
 
 ## Multi-domain operations
 
-`menutempmail` domain removal removes local TempMail acceptance only. It intentionally does not delete Cloudflare zones/DNS/routing.
+`menutempmail` domain removal removes local Pan-TempMail acceptance only. It intentionally does not delete Cloudflare zones/DNS/routing.
 
 To fully retire a domain:
 
 1. Disable/remove its Cloudflare catch-all after confirming no mail is needed.
-2. Remove it from TempMail menu.
+2. Remove it from Pan-TempMail menu.
 3. Keep DNS/zone unless explicitly retiring it.
 
 The panel offers the same in two labelled actions per row: `Hapus domain` (local only) and, for a
@@ -226,7 +226,7 @@ domain that is still routing, `Matikan & hapus` (disables the catch-all first, t
 
 ## Adding a domain from a second Cloudflare account
 
-One TempMail instance accepts domains from several Cloudflare accounts. Each profile keeps its own
+One Pan-TempMail instance accepts domains from several Cloudflare accounts. Each profile keeps its own
 account ID and API token, and every Cloudflare call for a domain uses that domain's profile, so a
 token can never act on the other account's zone. The check below is the proof to run after adding a
 profile: adding a domain that lives in account B while selecting account A must be rejected.
