@@ -348,6 +348,7 @@ Used by Cloudflare Worker to forward emails. Not for automation scripts.
 POST /api/email/receive
 Content-Type: application/json
 X-Email-API-Key: your-api-key
+X-Email-Signature: sha256=<hmac-sha256-hex-of-the-raw-body>   (wajib bila WORKER_SIGNING_SECRET diset)
 
 {
   "to": "your-name@your-domain.com",
@@ -355,6 +356,14 @@ X-Email-API-Key: your-api-key
   "raw": "From: verify@cloudflare.com\nTo: your-name@...\nSubject: Verify\n\nBody text"
 }
 ```
+
+Batas dan tanda tangan:
+
+| Hal | Aturan |
+|---|---|
+| Ukuran | `raw` maksimum `MAX_RAW_EMAIL_BYTES` (default 5 MiB). Melebihi batas, atau body request lebih besar dari batas + 4 KiB, dibalas `413 {"error":"Email terlalu besar","limit_bytes":...}` sebelum parsing. Batas yang sama dipakai jalur SMTP. |
+| Tanda tangan | Bila `WORKER_SIGNING_SECRET` diisi di `tempmail.env`, header `X-Email-Signature` wajib dan harus `sha256=` + HMAC-SHA256 dari body mentah memakai secret itu. Salah atau kosong dibalas `401 {"error":"Signature Worker tidak valid"}`. Bila secret kosong, tanda tangan tidak diminta (perilaku lama) dan server mencatat satu kali di log bahwa signing OFF. |
+| Deploy | Saat secret terisi, panel menambahkan binding `TEMPMAIL_SIGNING_SECRET` ke Worker sehingga Worker ikut menandatangani. Worker versi baru juga melaporkan `signed: true` di endpoint `fetch` miliknya. |
 
 **Response:**
 ```json
@@ -441,7 +450,30 @@ curl -s -X POST "$BASE/api/admin/cloudflare/domains/domain-b.example/routing" \
   -d '{"routing":true,"unlock_dns":true}'
 ```
 
-### 13. Server Actions API (root helper)
+### 13. Admin Users and Naming Rules (panel)
+
+Dipakai panel `/admin` pada seksi `Pengguna` dan `Aturan nama`. Butuh JWT dengan role admin.
+
+| Method | Path | Body | Hasil |
+|---|---|---|---|
+| GET | `/api/admin/users` | - | array user `{id,email,role,created_at,updated_at}` |
+| POST | `/api/admin/users` | `{"email","password","role"}` | `201` user baru; `409` bila email sudah ada |
+| PUT | `/api/admin/users/:id` | `{"email","role"}` (keduanya wajib) | user terbaru |
+| PUT | `/api/admin/users/:id/password` | `{"password"}` (min 6) | `204` |
+| DELETE | `/api/admin/users/:id` | - | `204`; menolak menghapus akun sendiri |
+| GET | `/api/admin/naming-rules` | - | objek aturan nama |
+| PUT | `/api/admin/naming-rules` | objek aturan penuh | aturan tersimpan |
+
+Bentuk aturan nama (`naming.Rules`): `template`, `separator`, `first_words[]`, `second_words[]`,
+`num_min`, `num_max`, `num_probability`. Token template yang dikenali: `{first}`, `{second}`, `{sep}`,
+`{num}`, `{rand:N}`, `{ts}`.
+
+Aturan kepemilikan inbox (berlaku untuk semua endpoint inbox/pesan): user non-admin hanya bisa membuka
+inbox miliknya sendiri (`inboxes.owner_id` sama dengan user yang login); inbox tanpa owner (dibuat
+otomasi) hanya bisa dibuka admin atau pemanggil `X-Email-API-Key`; admin bebas. Pelanggaran dibalas
+`403 {"error":"Inbox ini bukan milik akun kamu"}`.
+
+### 14. Server Actions API (root helper)
 
 The admin panel's `Server` section uses these. Requires an admin JWT. The app itself is unprivileged:
 requests go to the root helper through `/opt/tempmail/data/helper` (see `docs/RUNBOOK.md`).
