@@ -147,11 +147,31 @@
     .tile.warn .tile-value{color:var(--yellow)}
     .tile.bad .tile-value{color:var(--red)}
     .alert-list{list-style:none;display:flex;flex-direction:column;gap:8px;font-size:13px;margin-top:6px}
+    .strip{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 14px}
+    .pill{display:inline-flex;align-items:center;gap:7px;border:1px solid var(--border);background:var(--surface-2);
+      border-radius:999px;padding:5px 11px;font-size:12px;line-height:1;white-space:nowrap}
+    .pill i{width:8px;height:8px;border-radius:50%;background:var(--muted);flex:0 0 auto}
+    .pill b{font-weight:600}
+    .pill.ok i{background:var(--green)}
+    .pill.warn i{background:var(--yellow)}
+    .pill.bad i{background:var(--red)}
+    .pill.ok{border-color:rgba(34,197,94,.35)}
+    .pill.warn{border-color:rgba(250,204,21,.35)}
+    .pill.bad{border-color:rgba(239,68,68,.35)}
     .alert-list li{display:flex;align-items:flex-start;gap:8px;border-radius:9px;padding:10px 12px;
       background:rgba(234,179,8,.08);border:1px solid rgba(234,179,8,.35)}
     .alert-list li.bad{background:rgba(239,68,68,.08);border-color:rgba(239,68,68,.35)}
     .alert-list li.ok{background:rgba(34,197,94,.08);border-color:rgba(34,197,94,.3)}
     .alert-list li a{white-space:nowrap}
+    .domain-check{background:var(--bg);border:1px solid var(--border);border-radius:9px;padding:11px 12px;
+      display:flex;flex-direction:column;gap:7px}
+    .domain-check-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+    .aspects{display:flex;gap:6px;flex-wrap:wrap}
+    .setup-list li{align-items:flex-start;flex-wrap:wrap}
+    .step-main{flex:1;min-width:0;display:flex;flex-direction:column;gap:6px}
+    .step-main .note{margin-top:0}
+    .step-main code{word-break:break-all}
+    .setup-list .row-actions{margin-left:auto}
     .btn{text-decoration:none;display:inline-flex;align-items:center;gap:6px}
     .modal{position:fixed;inset:0;background:rgba(0,0,0,.72);display:flex;align-items:center;
       justify-content:center;padding:16px;z-index:50}
@@ -197,27 +217,29 @@
       <nav class="nav-group" aria-label="Bagian panel">
         <p>Ringkasan</p>
         <button class="nav-item" type="button" data-panel="dashboard">Dashboard
-          <small>ringkasan &amp; tindakan</small></button>
+          <small>status, angka, aksi</small></button>
+        <button class="nav-item" type="button" data-panel="setup">Setup
+          <small>langkah domain</small></button>
         <button class="nav-item" type="button" data-panel="server">Server
-          <small>service, backup, log, doctor</small></button>
+          <small>service, backup, log</small></button>
         <button class="nav-item" type="button" data-panel="diagnostics">Diagnostik
-          <small>helper, aplikasi, database, Cloudflare</small></button>
+          <small>fakta mentah</small></button>
       </nav>
 
       <nav class="nav-group" aria-label="Akun">
         <p>Akun</p>
         <button class="nav-item" type="button" data-panel="users">Pengguna
-          <small>akun panel &amp; role</small></button>
+          <small>akun &amp; role</small></button>
         <button class="nav-item" type="button" data-panel="naming">Aturan nama
-          <small>alamat inbox otomatis</small></button>
+          <small>alamat otomatis</small></button>
       </nav>
 
       <nav class="nav-group" aria-label="Cloudflare">
         <p>Cloudflare</p>
         <button class="nav-item" type="button" data-panel="cloudflare">Akun
-          <small>profil &amp; API token</small></button>
+          <small>profil &amp; token</small></button>
         <button class="nav-item" type="button" data-panel="domains">Domain
-          <small>zona &amp; routing catch-all</small></button>
+          <small>zona &amp; routing</small></button>
         <button class="nav-item" type="button" data-panel="tunnel">Tunnel
           <small>web host &amp; konektor</small></button>
       </nav>
@@ -225,9 +247,9 @@
       <nav class="nav-group" aria-label="Lainnya">
         <p>Lainnya</p>
         <button class="nav-item" type="button" data-panel="copies">Salinan email
-          <small>tembusan opsional</small></button>
+          <small>tembusan</small></button>
         <button class="nav-item" type="button" data-panel="import">Impor state
-          <small>dari menu lama</small></button>
+          <small>state lama</small></button>
       </nav>
 
       <div class="nav-foot">
@@ -259,7 +281,7 @@
           <div class="card-head">
             <div>
               <h2 id="hDashboard">Dashboard</h2>
-              <p class="note">Ringkasan yang dibaca lebih dulu: angka penting, hal yang butuh tindakan, lalu fakta mentah helper, aplikasi, database, dan Cloudflare.</p>
+              <p class="note">Status singkat, angka penting, lalu hal yang butuh tindakan.</p>
             </div>
             <div class="row-actions">
               <button id="testConnBtn" class="btn btn-s small" type="button">Test koneksi</button>
@@ -269,6 +291,7 @@
           <div id="statusOut" class="out" role="status" aria-live="polite"></div>
           <div id="serverState" class="state" role="status"></div>
           <div id="serverWrap" hidden>
+            <div class="strip" id="dbStrip"></div>
             <div class="tiles" id="dbTiles"></div>
           </div>
           <div id="svHelperNote" class="note warn" hidden></div>
@@ -305,11 +328,23 @@
           </div>
         </section>
 
+        <section class="panel card" data-panel="setup" aria-labelledby="hSetup" hidden>
+          <div class="card-head">
+            <div>
+              <h2 id="hSetup">Setup</h2>
+              <p class="note">Langkah 1-5: helper, profil, tunnel, domain, uji terima email. <b>Periksa semua</b> mengulang pemeriksaan.</p>
+            </div>
+            <button id="stCheckAllBtn" class="btn btn-p small" type="button">Periksa semua</button>
+          </div>
+          <ol class="list setup-list" id="setupSteps"></ol>
+          <div id="setupMsg" class="out" role="status" aria-live="polite"></div>
+        </section>
+
         <section class="panel card" data-panel="diagnostics" aria-labelledby="hDiagnostics" hidden>
           <div class="card-head">
             <div>
               <h2 id="hDiagnostics">Diagnostik</h2>
-              <p class="note">Gabungan fakta dari GET /api/admin/system/status dan GET /api/admin/cloudflare/status. Panel ini hanya membaca; aksi helper root ada di panel Server.</p>
+              <p class="note">Fakta mentah dari dua endpoint status. Hanya membaca; aksi ada di panel Server.</p>
             </div>
             <div class="row-actions">
               <button id="dgReloadBtn" class="btn btn-s small" type="button">Muat ulang</button>
@@ -352,7 +387,7 @@
           <div class="card-head">
             <div>
               <h2 id="hServer">Server</h2>
-              <p class="note">Aksi ini dijalankan helper root lewat allowlist: service, backup, log, doctor, dan konektor cloudflared.</p>
+              <p class="note">Dijalankan helper root lewat allowlist.</p>
             </div>
           </div>
 
@@ -383,7 +418,7 @@
             <div class="field">
               <label for="svTnToken">Connector token Cloudflare</label>
               <input id="svTnToken" type="password" autocomplete="off" spellcheck="false" placeholder="token dari dashboard Cloudflare">
-              <span class="hint">Token hanya dikirim ke helper root, tidak disimpan di panel dan tidak pernah ditampilkan lagi.</span>
+              <span class="hint">Tidak disimpan panel, tidak ditampilkan lagi.</span>
             </div>
             <div class="form-actions">
               <button id="svTnInstallBtn" class="btn btn-p" type="submit">Pasang/Update tunnel</button>
@@ -393,7 +428,7 @@
             <div class="field">
               <label for="svTnReset">Ketik RESET untuk logout tunnel</label>
               <input id="svTnReset" autocomplete="off" spellcheck="false" placeholder="RESET">
-              <span class="hint">Logout menghapus credential Cloudflare dan service cloudflared di server.</span>
+              <span class="hint">Menghapus credential + service cloudflared di server.</span>
             </div>
             <div class="form-actions">
               <button id="svTnLogoutBtn" class="btn btn-danger" type="submit">Logout tunnel</button>
@@ -413,7 +448,7 @@
           <div class="card-head">
             <div>
               <h2 id="hProfiles">Akun Cloudflare</h2>
-              <p class="note">Setiap domain terikat ke satu profil. Token disimpan terenkripsi di database dan tidak pernah ditampilkan lagi.</p>
+              <p class="note">Satu domain satu profil. Token terenkripsi di database, tidak pernah ditampilkan lagi.</p>
             </div>
             <button id="pfReloadBtn" class="btn btn-s small" type="button">Muat ulang</button>
           </div>
@@ -447,7 +482,7 @@
             <div class="field">
               <label for="pfToken">API token</label>
               <input id="pfToken" type="password" required autocomplete="off" placeholder="cloudflare api token">
-              <span class="hint">Buat di <a href="https://dash.cloudflare.com/profile/api-tokens" target="_blank" rel="noreferrer">dash.cloudflare.com/profile/api-tokens</a> dengan izin Zone:Read, Email Routing Rules:Edit, Workers Scripts:Edit (tambah Cloudflare Tunnel:Edit bila mau kelola tunnel dari panel). Token lama tidak wajib login ulang: tempel di baris profil untuk mengganti.</span>
+              <span class="hint">Buat di <a href="https://dash.cloudflare.com/profile/api-tokens" target="_blank" rel="noreferrer">dash.cloudflare.com/profile/api-tokens</a> · izin Zone:Read, Email Routing Rules:Edit, Workers Scripts:Edit (+ Cloudflare Tunnel:Edit untuk kelola tunnel). Ganti token lewat baris profil, tanpa login ulang.</span>
             </div>
             <label class="check"><input id="pfActivate" type="checkbox"> Jadikan profil aktif</label>
             <div class="form-actions">
@@ -476,6 +511,17 @@
               <tbody id="domainsBody"></tbody>
             </table>
           </div>
+          <div id="domainCheck" class="domain-check" hidden>
+            <div class="domain-check-head">
+              <h3>Pemeriksaan <span class="mono" id="dcDomain"></span></h3>
+            </div>
+            <div class="aspects" id="dcBadges"></div>
+            <ul class="alert-list" id="dcIssues"></ul>
+            <div class="row-actions">
+              <button id="dcFixBtn" class="btn btn-p small" type="button" disabled>Rapikan</button>
+            </div>
+            <div id="domainCheckMsg" class="out" role="status" aria-live="polite"></div>
+          </div>
           <div id="domainsMsg" class="out" role="status" aria-live="polite"></div>
           <h3>Tambah domain</h3>
           <form id="domainForm" class="grid">
@@ -497,7 +543,7 @@
           <div class="card-head">
             <div>
               <h2 id="hTunnel">Tunnel</h2>
-              <p class="note">Hostname tunnel adalah jalur Worker ke server ini. Hostname webnya bukan domain temp mail.</p>
+              <p class="note">Jalur Worker ke server ini, bukan domain temp mail.</p>
             </div>
             <button id="tnReloadBtn" class="btn btn-s small" type="button">Muat ulang</button>
           </div>
@@ -511,7 +557,7 @@
             <div class="field">
               <label for="tnWebHost">Web host</label>
               <input id="tnWebHost" placeholder="mail.example.com">
-              <span class="hint">Harus punya CNAME ke tunnel. Nilai ini dipakai Worker sebagai TEMPMAIL_SERVER_URL.</span>
+              <span class="hint">Butuh CNAME ke tunnel; dipakai Worker sebagai TEMPMAIL_SERVER_URL.</span>
             </div>
             <div class="field">
               <label for="tnName">Nama tunnel</label>
@@ -520,11 +566,12 @@
             <div class="form-actions">
               <button id="tnSaveBtn" class="btn btn-p" type="submit">Simpan setelan</button>
               <button id="tnCreateBtn" class="btn btn-s" type="button">Buat tunnel baru</button>
+              <button id="tnCnameBtn" class="btn btn-s" type="button">Buat CNAME web host</button>
             </div>
           </form>
-          <p class="note">Memasang, me-restart, dan logout konektor <span class="mono">cloudflared</span> ada di panel <b>Server</b> karena butuh helper root.</p>
+          <p class="note">Pasang, restart, dan logout konektor <span class="mono">cloudflared</span> ada di panel <b>Server</b>.</p>
           <h3>Konektor di server (tanpa API token)</h3>
-          <p class="note">Status dari <span class="mono">cloudflared</span> di host ini dibaca helper root, jadi tetap jalan walau profil Cloudflare belum punya API token. Info di atas (nama, ID, koneksi, web host) datang dari Cloudflare API dan baru terisi setelah token ditempel.</p>
+          <p class="note">Dibaca helper root, jadi tetap jalan walau profil belum punya token. Info di atas datang dari Cloudflare API.</p>
           <div class="row-actions">
             <button id="tnHelperBtn" class="btn btn-s" type="button">Cek konektor</button>
           </div>
@@ -536,7 +583,7 @@
           <div class="card-head">
             <div>
               <h2 id="hCopies">Salinan email</h2>
-              <p class="note">Kosong berarti OFF. Alamat tujuan harus diverifikasi Cloudflare di akun profil terkait, dan berlaku setelah Worker di-deploy ulang.</p>
+              <p class="note">Kosong = OFF. Tujuan harus diverifikasi Cloudflare; berlaku setelah Worker di-deploy ulang.</p>
             </div>
           </div>
           <div id="copiesState" class="state" role="status"></div>
@@ -560,7 +607,7 @@
           <div class="card-head">
             <div>
               <h2 id="hImport">Impor state lama</h2>
-              <p class="note">Tempel isi <span class="mono">cloudflare-state.json</span> dari menu lama. Profil yang sudah ada tetap, token lama tidak ditimpa.</p>
+              <p class="note">Tempel <span class="mono">cloudflare-state.json</span> dari menu lama. Profil yang ada tetap, token tidak ditimpa.</p>
             </div>
           </div>
           <div id="imState" class="state" role="status"></div>
@@ -580,7 +627,7 @@
           <div class="card-head">
             <div>
               <h2 id="hUsers">Pengguna</h2>
-              <p class="note">Akun panel dari GET /api/admin/users. Role admin bisa membuka /admin, role user hanya bisa masuk lewat API. Password hanya dikirim satu arah dan tidak pernah ditampilkan kembali.</p>
+              <p class="note">Role admin bisa membuka /admin; role user hanya lewat API. Password satu arah.</p>
             </div>
             <button id="usReloadBtn" class="btn btn-s small" type="button">Muat ulang</button>
           </div>
@@ -605,7 +652,7 @@
             <div class="field">
               <label for="usPassword">Password</label>
               <input id="usPassword" type="password" required minlength="6" autocomplete="new-password" placeholder="minimal 6 karakter">
-              <span class="hint">Password dikirim sekali saat akun dibuat, kolom ini dikosongkan setelah dikirim dan tidak bisa dibaca lagi dari panel.</span>
+              <span class="hint">Dikirim sekali, kolom dikosongkan, tidak bisa dibaca lagi.</span>
             </div>
             <div class="field">
               <label for="usRole">Role</label>
@@ -624,7 +671,7 @@
           <div class="card-head">
             <div>
               <h2 id="hNaming">Aturan nama</h2>
-              <p class="note">Dipakai server saat alamat inbox dibuat tanpa username. Token template yang dikenali: {first}, {second}, {sep}, {num}, {rand:N}, {ts}.</p>
+              <p class="note">Dipakai saat inbox dibuat tanpa username. Token: {first}, {second}, {sep}, {num}, {rand:N}, {ts}.</p>
             </div>
             <button id="nmReloadBtn" class="btn btn-s small" type="button">Muat ulang</button>
           </div>
@@ -633,7 +680,7 @@
             <div class="field">
               <label for="nmTemplate">Template</label>
               <input id="nmTemplate" spellcheck="false" placeholder="{first}{sep}{second}{num}">
-              <span class="hint">Susunan token untuk local-part alamat, misalnya {first}{sep}{second}{num}.</span>
+              <span class="hint">Susunan token local-part, misalnya {first}{sep}{second}{num}.</span>
             </div>
             <div class="field">
               <label for="nmSeparator">Pemisah</label>
@@ -684,8 +731,8 @@
     </div>
   </div>
 
-  <script src="/app/app.js?v=5"></script>
-  <script src="/app/admin.js?v=5"></script>
-  <script src="/app/admin-nav.js?v=5"></script>
+  <script src="/app/app.js?v=7"></script>
+  <script src="/app/admin.js?v=7"></script>
+  <script src="/app/admin-nav.js?v=7"></script>
 </body>
 </html>

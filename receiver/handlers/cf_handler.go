@@ -420,26 +420,11 @@ func CFDeployWorker(c *gin.Context) {
 		cfFail(c, http.StatusBadRequest, "Profil tidak siap dipakai", err)
 		return
 	}
-	apiKey := os.Getenv("EMAIL_API_KEY")
-	if apiKey == "" {
-		cfFail(c, http.StatusBadRequest, "EMAIL_API_KEY belum diset di server", nil)
-		return
-	}
 	_, _, webHost := cfTunnelSettings(db)
-	if webHost == "" {
-		cfFail(c, http.StatusBadRequest, "Web host tunnel belum diset, isi dulu di bagian Tunnel", nil)
+	bindings, secrets, err := cfWorkerBindings(db, webHost)
+	if err != nil {
+		cfFail(c, http.StatusBadRequest, err.Error(), nil)
 		return
-	}
-	copies := strings.Join(cfConfiguredCopies(db), ",")
-	bindings := []cloudflare.Binding{
-		{Name: "TEMPMAIL_SERVER_URL", Type: "secret_text", Text: "https://" + webHost},
-		{Name: "TEMPMAIL_API_KEY", Type: "secret_text", Text: apiKey},
-		{Name: "FORWARD_LIST", Type: "secret_text", Text: copies},
-	}
-	secrets := []string{"TEMPMAIL_SERVER_URL", "TEMPMAIL_API_KEY", "FORWARD_LIST"}
-	if signingSecret := strings.TrimSpace(os.Getenv("WORKER_SIGNING_SECRET")); signingSecret != "" {
-		bindings = append(bindings, cloudflare.Binding{Name: "TEMPMAIL_SIGNING_SECRET", Type: "secret_text", Text: signingSecret})
-		secrets = append(secrets, "TEMPMAIL_SIGNING_SECRET")
 	}
 	deployment, err := client.DeployWorker(profile.AccountID, worker.Name(), worker.CompatDate(), worker.Script(), bindings)
 	if err != nil {

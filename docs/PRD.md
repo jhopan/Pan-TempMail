@@ -90,6 +90,9 @@ Empty destination list means OFF. A copy destination must be verified by Cloudfl
 
 - Each profile stores account ID and token root-only on host.
 - Each domain belongs to exactly one profile.
+- Adding a domain must be doable from the web panel for a domain in the same Cloudflare account and for a domain in a different account (second profile), with no SSH step.
+- Every domain has a readiness checklist that reads the real Cloudflare state: zone active, Worker deployed for the owning profile, catch-all routing pointed at that Worker, Email Routing DNS records present, and the web-host CNAME present and proxied.
+- The checklist reports problems and can repair the safe subset (deploy Worker, enable routing, create missing Email Routing records, create the web-host CNAME). It never deletes DNS records, and a foreign MX is reported as a conflict for the owner to resolve.
 - Tunnel can serve one web hostname and receive Worker traffic from domains across profiles.
 - Catch-all changes require explicit confirmation.
 
@@ -101,9 +104,10 @@ Empty destination list means OFF. A copy destination must be verified by Cloudfl
 
 ### Admin panel sections
 
-- `Dashboard` (landing: status helper, angka penting profil/domain/Worker/tunnel/inbox/database, daftar hal yang butuh tindakan, pintasan ke panel lain, plus fakta mentah helper, aplikasi, database, Cloudflare), `Server` (helper actions), `Diagnostik` (fakta mentah kedua endpoint status dalam satu layar), `Akun Cloudflare`, `Domain`, `Tunnel`, `Salinan email`, `Impor state`, `Pengguna` (create user, change role, reset password, delete), dan `Aturan nama` (edit the auto-generated inbox naming rules).
+- `Dashboard` (landing: strip pil status untuk helper, profil, token, Worker, routing, tunnel, salinan; tiga ubin angka inbox, database, dan RAM; daftar hal yang butuh tindakan dengan judul singkat dan tombol menuju panel terkait; pintasan; plus fakta mentah helper, aplikasi, database, Cloudflare), `Setup` (checklist lima langkah: helper root, profil Cloudflare, tunnel + CNAME web host, domain + Worker + routing + Email DNS, uji terima email), `Server` (helper actions), `Diagnostik` (fakta mentah kedua endpoint status dalam satu layar), `Akun Cloudflare`, `Domain`, `Tunnel`, `Salinan email`, `Impor state`, `Pengguna` (create user, change role, reset password, delete), dan `Aturan nama` (edit the auto-generated inbox naming rules).
 - The content column spans the available width (no fixed max width) so tables and riwayat log tidak menyisakan ruang kosong di layar lebar.
 - Every panel lists its data with loading, empty, and error states, and every control calls a real endpoint.
+- Panels stay scannable: status is shown as compact pills and numbers, alert and step text is a short headline with the long explanation kept in the element's `title`, and notes are one line. Panels must not explain the same fact twice.
 - Password fields are write-only: sent once, cleared, never rendered back.
 
 ## 7. Security requirements
@@ -134,6 +138,8 @@ Empty destination list means OFF. A copy destination must be verified by Cloudfl
 - OTP/link extraction succeeds for test message.
 - `menutempmail` shows accurate dashboard state.
 - A domain from CF A and a domain from CF B can route to the same TempMail instance after their respective Worker/routing setup.
+- A domain in a second Cloudflare account can be added, Worker-deployed for that profile, and routed through the panel alone, with the readiness checklist showing the real Cloudflare state at each step.
+- The panel `Setup` checklist drives a first install end to end: helper, profile, tunnel plus web-host CNAME, domain plus Worker/routing/Email DNS, and a receiving test inbox.
 - The admin panel (`/admin`) can add a Cloudflare profile, add a domain, deploy the Worker, and enable routing, with Cloudflare errors shown verbatim.
 - Menu and panel report the same profiles, domains, routing state, tunnel state, and copy destinations from one source of truth.
 - Panel `Server` section restarts the service, runs the backup, shows journald logs, runs doctor, and installs/restarts/logs out the tunnel through the root helper, while the app process itself stays unprivileged.

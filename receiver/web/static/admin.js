@@ -15,6 +15,16 @@ const state = {
   workerCompatDate: '',
   system: null,
   systemHelper: null,
+  domainCheck: null,
+  setup: {
+    helper: null,
+    profile: null,
+    tunnel: null,
+    domains: [],
+    domainsChecked: false,
+    inbox: '',
+    inboxTotal: null,
+  },
 };
 
 const ui = {
@@ -81,6 +91,7 @@ const ui = {
   svDb: document.getElementById('svDb'),
   svCf: document.getElementById('svCf'),
   svHelperNote: document.getElementById('svHelperNote'),
+  dbStrip: document.getElementById('dbStrip'),
   dbTiles: document.getElementById('dbTiles'),
   dbAlerts: document.getElementById('dbAlerts'),
   dbAlertsWrap: document.getElementById('dbAlertsWrap'),
@@ -135,6 +146,16 @@ const ui = {
   dgTunnel: document.getElementById('dgTunnel'),
   dgCfDomains: document.getElementById('dgCfDomains'),
   dgMsg: document.getElementById('dgMsg'),
+  domainCheck: document.getElementById('domainCheck'),
+  dcDomain: document.getElementById('dcDomain'),
+  dcBadges: document.getElementById('dcBadges'),
+  dcIssues: document.getElementById('dcIssues'),
+  dcFixBtn: document.getElementById('dcFixBtn'),
+  domainCheckMsg: document.getElementById('domainCheckMsg'),
+  tnCnameBtn: document.getElementById('tnCnameBtn'),
+  stCheckAllBtn: document.getElementById('stCheckAllBtn'),
+  setupSteps: document.getElementById('setupSteps'),
+  setupMsg: document.getElementById('setupMsg'),
 };
 
 let lastFocus = null;
@@ -569,9 +590,123 @@ function renderDomains() {
         message(ui.domainsMsg, 'ok', 'Domain ' + d.domain + ' terhapus dari database, Cloudflare tidak diubah');
       });
     });
-    tr.append(actionCell([toggle, drop]));
+    const inspect = button('Periksa', 'btn btn-s small');
+    inspect.addEventListener('click', function () {
+      run(inspect, ui.domainsMsg, async function () {
+        await checkDomainPanel(d.domain);
+      });
+    });
+    tr.append(actionCell([inspect, toggle, drop]));
     ui.domainsBody.append(tr);
   });
+}
+
+// --- domain check (GET /check, POST /fix) ---
+
+const DOMAIN_FIXABLE_KEYS = ['worker', 'routing', 'email_dns', 'cname'];
+
+function fixableDomainKeys(check) {
+  const keys = [];
+  ((check && check.issues) || []).forEach(function (issue) {
+    if (!issue || !issue.fixable) return;
+    if (DOMAIN_FIXABLE_KEYS.indexOf(issue.key) === -1) return;
+    if (keys.indexOf(issue.key) === -1) keys.push(issue.key);
+  });
+  return keys;
+}
+
+function fetchDomainCheck(domain) {
+  return cf('/domains/' + encodeURIComponent(domain) + '/check');
+}
+
+async function applyDomainFix(domain, check) {
+  const keys = fixableDomainKeys(check);
+  if (keys.length === 0) {
+    throw { error: 'Tidak ada perbaikan otomatis untuk domain ini', detail: 'Semua catatan butuh tindakan manual' };
+  }
+  const payload = {};
+  keys.forEach(function (key) { payload[key] = true; });
+  const outcome = await cf('/domains/' + encodeURIComponent(domain) + '/fix', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+  return { outcome: outcome || {}, keys: keys };
+}
+
+function fixOutcomeLines(outcome) {
+  const lines = [];
+  (outcome.done || []).forEach(function (item) {
+    lines.push('berhasil ' + item.key + ': ' + (item.message || ''));
+  });
+  (outcome.skipped || []).forEach(function (item) {
+    lines.push('dilewati ' + item.key + ': ' + (item.message || ''));
+  });
+  (outcome.failed || []).forEach(function (item) {
+    lines.push('gagal ' + item.key + ': ' + (item.message || '') + (item.detail ? ' (' + item.detail + ')' : ''));
+  });
+  return lines;
+}
+
+function showFixOutcome(domain, outcome, msgEl) {
+  const done = (outcome.done || []).length;
+  const skipped = (outcome.skipped || []).length;
+  const failed = (outcome.failed || []).length;
+  message(msgEl, failed ? 'error' : 'ok',
+    'Rapikan ' + domain + ': ' + done + ' berhasil, ' + skipped + ' dilewati, ' + failed + ' gagal',
+    fixOutcomeLines(outcome).join(' | '));
+}
+
+function aspectBadge(label, ok, detail) {
+  const span = node('span', 'badge' + (ok ? ' on' : ' off'), label + ': ' + (ok ? 'ok' : 'perlu'));
+  if (detail) span.title = detail;
+  return span;
+}
+
+function renderDomainCheck(data) {
+  if (!data) return;
+  state.domainCheck = { domain: data.domain || '', data: data, keys: fixableDomainKeys(data) };
+  const zone = data.zone || {};
+  const worker = data.worker || {};
+  const routing = data.routing || {};
+  const emailDns = data.email_dns || {};
+  const webHost = data.web_host || {};
+  const missing = emailDns.missing || [];
+  ui.domainCheck.hidden = false;
+  ui.dcDomain.textContent = state.domainCheck.domain || '-';
+  ui.dcBadges.replaceChildren(
+    aspectBadge('Zone', String(zone.status || '').toLowerCase() === 'active',
+      (zone.name || state.domainCheck.domain) + ': ' + (zone.status || 'tidak ditemukan')),
+    aspectBadge('Worker', !!worker.deployed, worker.name || 'nama Worker tidak diketahui'),
+    aspectBadge('Routing', !!routing.ok, routing.target ? 'catch-all ke ' + routing.target : 'catch-all belum diarahkan ke Worker'),
+    aspectBadge('Email DNS', !!emailDns.ready, missing.length ? missing.length + ' catatan kurang' : 'semua catatan wajib ada'),
+    aspectBadge('CNAME web host', !!webHost.ok,
+      webHost.configured ? webHost.host + ' -> ' + (webHost.expected || '-') : 'web host belum diset')
+  );
+  const issues = data.issues || [];
+  ui.dcIssues.replaceChildren();
+  if (issues.length === 0) {
+    const li = node('li', 'ok');
+    li.append(badge('ok', true), node('span', null, 'Tidak ada catatan, semua pemeriksaan lolos.'));
+    ui.dcIssues.append(li);
+  } else {
+    issues.forEach(function (issue) {
+      const level = issue.level === 'bad' ? 'bad' : (issue.level === 'ok' ? 'ok' : 'warn');
+      const li = node('li', level === 'warn' ? null : level);
+      li.append(badge(issue.level || 'info', level === 'ok'));
+      li.append(node('span', null, issue.message || issue.key || '-'));
+      if (issue.fixable) li.append(badge('bisa dirapikan', false));
+      ui.dcIssues.append(li);
+    });
+  }
+  ui.dcFixBtn.disabled = state.domainCheck.keys.length === 0;
+}
+
+async function checkDomainPanel(domain) {
+  const data = await fetchDomainCheck(domain);
+  renderDomainCheck(data);
+  clearMessage(ui.domainCheckMsg);
+  if (ui.domainCheck.scrollIntoView) ui.domainCheck.scrollIntoView({ block: 'nearest' });
+  return data;
 }
 
 // --- tunnel ---
@@ -652,6 +787,362 @@ function tunnelResultNode(out) {
     });
   }
   return box;
+}
+
+async function createTunnelCname() {
+  return cf('/tunnel/cname', { method: 'POST', body: '{}' });
+}
+
+function tunnelCnameMessage(out) {
+  const zone = (out && out.zone) || {};
+  const head = out && out.created
+    ? 'CNAME web host dibuat'
+    : (out && out.existing ? 'CNAME web host sudah ada' : 'CNAME web host tidak dibuat');
+  return {
+    text: head + ': ' + ((out && out.web_host) || '-') + ' -> ' + ((out && out.expected) || '-'),
+    detail: 'zone ' + (zone.name || '-') + ' (' + (zone.id || '-') + ')',
+  };
+}
+
+// --- setup (lima langkah domain dari panel web) ---
+
+function setupBadge(level) {
+  const text = level === 'ok' ? 'selesai' : (level === 'bad' ? 'belum' : 'perlu dicek');
+  const span = node('span', 'badge' + (level === 'ok' ? ' on' : (level === 'bad' ? ' off' : '')), text);
+  return span;
+}
+
+function setupLink(label, hash) {
+  const link = node('a', 'btn btn-p small', label);
+  link.href = hash;
+  return link;
+}
+
+function setupStepNode(number, title, level, detail, actions, body) {
+  const li = node('li');
+  li.append(setupBadge(level || 'warn'));
+  const main = node('div', 'step-main');
+  main.append(node('strong', null, number + '. ' + title));
+  main.append(node('div', 'note', detail || 'Belum diperiksa. Tekan Periksa semua.'));
+  if (body) main.append(body);
+  li.append(main);
+  if (actions && actions.length) {
+    const box = node('div', 'row-actions');
+    actions.forEach(function (action) { box.append(action); });
+    li.append(box);
+  }
+  return li;
+}
+
+function setupDomainReady(check) {
+  const worker = (check && check.worker) || {};
+  const routing = (check && check.routing) || {};
+  const emailDns = (check && check.email_dns) || {};
+  const webHost = (check && check.web_host) || {};
+  return !!(worker.deployed && routing.ok && emailDns.ready && webHost.ok);
+}
+
+function setupDomainLevel(entries) {
+  if (!state.setup.domainsChecked) {
+    return { level: 'warn', detail: 'Belum diperiksa. Tekan Periksa semua.' };
+  }
+  if (state.setup.domainsError) {
+    return { level: 'bad', detail: state.setup.domainsError };
+  }
+  if (!entries || entries.length === 0) {
+    return { level: 'bad', detail: 'Belum ada domain terdaftar. Tambahkan domain dulu di panel Domain.' };
+  }
+  let ready = 0;
+  let failed = 0;
+  entries.forEach(function (entry) {
+    if (entry.error) {
+      failed++;
+      return;
+    }
+    if (setupDomainReady(entry.check)) ready++;
+  });
+  if (failed) {
+    return { level: 'bad', detail: failed + '/' + entries.length + ' gagal diperiksa.' };
+  }
+  if (ready === entries.length) {
+    return { level: 'ok', detail: 'Semua ' + entries.length + ' domain siap.' };
+  }
+  return { level: 'warn', detail: ready + '/' + entries.length + ' domain siap.' };
+}
+
+function renderSetup() {
+  const s = state.setup;
+  const steps = [];
+
+  const helperInfo = s.helper || { level: 'warn', detail: 'Belum diperiksa.' };
+  steps.push(setupStepNode(1, 'Helper root', helperInfo.level, helperInfo.detail,
+    [setupLink('Buka panel Server', '#server')]));
+
+  const profileInfo = s.profile || { level: 'warn', detail: 'Belum diperiksa.' };
+  steps.push(setupStepNode(2, 'Profil Cloudflare', profileInfo.level, profileInfo.detail,
+    [setupLink('Buka Akun Cloudflare', '#cloudflare')]));
+
+  const tunnelInfo = s.tunnel || { level: 'warn', detail: 'Belum diperiksa.' };
+  const cnameBtn = button('Buat CNAME web host', 'btn btn-p small');
+  cnameBtn.addEventListener('click', function () {
+    run(cnameBtn, ui.setupMsg, async function () {
+      const out = await createTunnelCname();
+      const info = tunnelCnameMessage(out);
+      message(ui.setupMsg, 'ok', info.text, info.detail);
+      await checkSetupTunnel();
+      renderSetup();
+    });
+  });
+  steps.push(setupStepNode(3, 'Tunnel', tunnelInfo.level, tunnelInfo.detail, [cnameBtn]));
+
+  const domainInfo = setupDomainLevel(s.domains);
+  const checkDomainsBtn = button('Periksa domain', 'btn btn-p small');
+  checkDomainsBtn.addEventListener('click', function () {
+    run(checkDomainsBtn, ui.setupMsg, async function () {
+      await checkSetupDomains();
+      renderSetup();
+      message(ui.setupMsg, 'ok', 'Pemeriksaan domain selesai', 'maks 5 domain diperiksa berurutan');
+    });
+  });
+  const domainBody = node('div');
+  if (s.domains.length === 0) {
+    domainBody.append(node('div', 'note', s.domainsError || 'Belum ada domain yang diperiksa.'));
+  } else {
+    s.domains.forEach(function (entry) {
+      const box = node('div', 'domain-check');
+      const head = node('div', 'domain-check-head');
+      head.append(node('strong', null, entry.domain));
+      if (entry.profile) head.append(node('span', 'badge', entry.profile));
+      box.append(head);
+      if (entry.error) {
+        box.append(node('div', 'note warn', 'Pemeriksaan gagal: ' + entry.error));
+      } else {
+        const check = entry.check || {};
+        const worker = check.worker || {};
+        const routing = check.routing || {};
+        const emailDns = check.email_dns || {};
+        const webHost = check.web_host || {};
+        const missing = emailDns.missing || [];
+        const aspects = node('div', 'aspects');
+        aspects.append(
+          aspectBadge('Worker', !!worker.deployed, worker.name || ''),
+          aspectBadge('Routing', !!routing.ok, routing.target ? 'catch-all ke ' + routing.target : 'belum diarahkan'),
+          aspectBadge('Email DNS', !!emailDns.ready, missing.length ? missing.length + ' catatan kurang' : 'siap'),
+          aspectBadge('CNAME', !!webHost.ok, webHost.configured ? webHost.host : 'web host belum diset')
+        );
+        box.append(aspects);
+        const issues = (check.issues || []).filter(function (issue) { return issue.level !== 'ok'; });
+        box.append(node('div', 'note', issues.length
+          ? issues.length + ' catatan. Rincian di panel Domain.'
+          : (setupDomainReady(check) ? 'Semua pemeriksaan lolos.' : 'Ada aspek belum siap.')));
+        const fixBtn = button('Rapikan', 'btn btn-s small');
+        fixBtn.disabled = fixableDomainKeys(check).length === 0;
+        fixBtn.addEventListener('click', function () {
+          run(fixBtn, ui.setupMsg, async function () {
+            const result = await applyDomainFix(entry.domain, entry.check);
+            await refreshSetupDomain(entry.domain);
+            renderSetup();
+            showFixOutcome(entry.domain, result.outcome, ui.setupMsg);
+          });
+        });
+        const row = node('div', 'row-actions');
+        row.append(fixBtn);
+        box.append(row);
+      }
+      domainBody.append(box);
+    });
+  }
+  steps.push(setupStepNode(4, 'Domain', domainInfo.level, domainInfo.detail, [checkDomainsBtn], domainBody));
+
+  let inboxLevel = 'warn';
+  let inboxDetail = 'Belum ada alamat uji.';
+  if (s.inbox) {
+    if (s.inboxTotal === null || s.inboxTotal === undefined) {
+      inboxDetail = 'Kirim email dari luar, lalu Cek pesan.';
+    } else if (s.inboxTotal > 0) {
+      inboxLevel = 'ok';
+      inboxDetail = s.inboxTotal + ' pesan diterima.';
+    } else {
+      inboxDetail = 'Alamat siap, belum ada pesan.';
+    }
+  }
+  const inboxBody = node('div');
+  if (s.inbox) {
+    inboxBody.append(node('div', 'note', 'Kirim email dari luar ke alamat ini, lalu Cek pesan.'));
+    inboxBody.append(node('code', 'mono', s.inbox));
+  }
+  const inboxActions = [];
+  const makeInboxBtn = button(s.inbox ? 'Buat alamat baru' : 'Buat alamat uji', 'btn btn-p small');
+  makeInboxBtn.addEventListener('click', function () {
+    run(makeInboxBtn, ui.setupMsg, async function () {
+      const out = await apiRequest('', '/api/inbox', {
+        method: 'POST',
+        body: JSON.stringify({ username: randomUsername(8) }),
+      });
+      s.inbox = (out && out.email) || '';
+      s.inboxTotal = null;
+      renderSetup();
+      message(ui.setupMsg, 'ok', 'Alamat uji dibuat: ' + s.inbox, 'kirim email dari luar ke alamat itu lalu tekan Cek pesan');
+    });
+  });
+  inboxActions.push(makeInboxBtn);
+  if (s.inbox) {
+    const checkInboxBtn = button('Cek pesan', 'btn btn-s small');
+    checkInboxBtn.addEventListener('click', function () {
+      run(checkInboxBtn, ui.setupMsg, async function () {
+        const out = await apiRequest('', '/api/inbox/' + encodeURIComponent(s.inbox), { method: 'GET' });
+        const list = (out && out.data) || [];
+        const total = out && typeof out.total === 'number' ? out.total : list.length;
+        const latest = list[0];
+        s.inboxTotal = total;
+        renderSetup();
+        message(ui.setupMsg, 'ok', s.inbox + ': ' + total + ' pesan',
+          latest ? 'terbaru: ' + (latest.subject || '(tanpa subjek)') + ' dari ' + (latest.from || latest.sender || '-') : 'kotak masuk masih kosong, kirim email dari luar dulu');
+      });
+    });
+    inboxActions.push(checkInboxBtn);
+  }
+  steps.push(setupStepNode(5, 'Uji terima email', inboxLevel, inboxDetail, inboxActions, inboxBody));
+
+  ui.setupSteps.replaceChildren();
+  steps.forEach(function (step) { ui.setupSteps.append(step); });
+}
+
+function randomUsername(length) {
+  const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
+  const size = length || 8;
+  const bytes = new Uint8Array(size);
+  if (window.crypto && window.crypto.getRandomValues) {
+    window.crypto.getRandomValues(bytes);
+  } else {
+    for (let i = 0; i < size; i++) bytes[i] = Math.floor(Math.random() * 256);
+  }
+  let out = '';
+  for (let i = 0; i < size; i++) out += chars[bytes[i] % chars.length];
+  return out;
+}
+
+async function checkSetupHelper() {
+  try {
+    const out = await apiGet('/status');
+    const helper = (out && out.helper) || {};
+    const pending = countOf(helper.pending);
+    state.setup.helper = helper.installed
+      ? {
+        level: 'ok',
+        detail: 'Terpasang' + (helper.dir ? ' · ' + helper.dir : '') +
+          (pending ? ' · ' + pending + ' request tertunda' : ''),
+      }
+      : {
+        level: 'bad',
+        detail: 'Belum dipasang. Jalankan deploy/linux/install.sh.',
+      };
+  } catch (err) {
+    state.setup.helper = { level: 'bad', detail: 'Gagal membaca status helper: ' + apiFailure(err).message };
+  }
+}
+
+async function checkSetupProfile() {
+  try {
+    const profiles = await cf('/profiles');
+    const list = Array.isArray(profiles) ? profiles : [];
+    const withToken = list.filter(function (profile) { return profile.has_token; });
+    if (list.length === 0) {
+      state.setup.profile = {
+        level: 'bad',
+        detail: 'Belum ada profil. Tambah profil dan API token.',
+      };
+    } else if (withToken.length === 0) {
+      state.setup.profile = {
+        level: 'bad',
+        detail: list.length + ' profil ada, token belum. Tempel token di panel Akun Cloudflare.',
+      };
+    } else {
+      state.setup.profile = {
+        level: 'ok',
+        detail: withToken.length + '/' + list.length + ' token: ' +
+          withToken.map(function (profile) { return profile.id; }).join(', '),
+      };
+    }
+  } catch (err) {
+    state.setup.profile = { level: 'bad', detail: 'Gagal membaca profil Cloudflare: ' + apiFailure(err).message };
+  }
+}
+
+async function checkSetupTunnel() {
+  try {
+    const tunnel = await cf('/tunnel');
+    const status = String((tunnel && tunnel.status) || 'unknown');
+    const healthy = ['healthy', 'up', 'connected', 'active'].indexOf(status.toLowerCase()) !== -1;
+    const webHost = (tunnel && tunnel.web_host) || '';
+    const id = (tunnel && tunnel.id) || '';
+    let level = 'ok';
+    let detail = webHost + ' · tunnel ' + id + ' · ' + status;
+    if (!webHost || !id) {
+      level = 'bad';
+      detail = 'Lengkapi setelan tunnel: ' + (webHost ? '' : 'web host belum diset') +
+        (!webHost && !id ? ', ' : '') + (id ? '' : 'ID tunnel belum ada');
+    } else if (!healthy) {
+      level = 'warn';
+      detail = webHost + ' · tunnel ' + id + ' · ' + status + ' · jalankan konektor di panel Server';
+    }
+    state.setup.tunnel = { level: level, detail: detail };
+  } catch (err) {
+    state.setup.tunnel = { level: 'bad', detail: 'Gagal membaca status tunnel: ' + apiFailure(err).message };
+  }
+}
+
+async function checkSetupDomains() {
+  state.setup.domainsChecked = true;
+  let domains;
+  try {
+    domains = await cf('/domains');
+  } catch (err) {
+    state.setup.domains = [];
+    state.setup.domainsError = 'Gagal membaca daftar domain: ' + apiFailure(err).message;
+    return;
+  }
+  state.setup.domainsError = '';
+  const list = Array.isArray(domains) ? domains : [];
+  const entries = [];
+  const limited = list.slice(0, 5);
+  for (let i = 0; i < limited.length; i++) {
+    const item = limited[i];
+    const domain = (item && item.domain) || '';
+    if (!domain) continue;
+    const entry = { domain: domain, profile: (item && item.profile) || '', check: null, error: '' };
+    try {
+      entry.check = await fetchDomainCheck(domain);
+    } catch (err) {
+      entry.error = apiFailure(err).message;
+    }
+    entries.push(entry);
+  }
+  state.setup.domains = entries;
+}
+
+async function refreshSetupDomain(domain) {
+  const entry = state.setup.domains.filter(function (item) { return item.domain === domain; })[0];
+  if (!entry) return;
+  try {
+    entry.check = await fetchDomainCheck(domain);
+    entry.error = '';
+  } catch (err) {
+    entry.check = null;
+    entry.error = apiFailure(err).message;
+  }
+}
+
+async function checkSetupAll() {
+  await Promise.all([checkSetupHelper(), checkSetupProfile(), checkSetupTunnel()]);
+  renderSetup();
+  await checkSetupDomains();
+  renderSetup();
+}
+
+async function loadSetup() {
+  renderSetup();
+  await run(ui.stCheckAllBtn, ui.setupMsg, checkSetupAll);
 }
 
 // --- server (root helper) ---
@@ -769,6 +1260,13 @@ function tile(label, value, sub, tone) {
   return box;
 }
 
+// Pil status untuk strip dashboard: label pendek, nilai, dan warna titik sebagai penanda.
+function pill(label, value, tone) {
+  const span = node('span', 'pill' + (tone ? ' ' + tone : ''));
+  span.append(node('i'), node('span', null, label + ' '), node('b', null, value));
+  return span;
+}
+
 function panelLink(href, label) {
   const link = document.createElement('a');
   link.href = href;
@@ -786,72 +1284,72 @@ function renderDashboard(sys, cf, cfError) {
   const domains = (cf && cf.domains) || [];
   const tunnel = (cf && cf.tunnel) || {};
   const copies = (cf && cf.copies) || [];
-  const active = profiles.filter(function (p) { return p.active; })[0] || null;
   const routed = domains.filter(function (d) { return d.routing; });
   const withoutToken = profiles.filter(function (p) { return !p.has_token; });
   const withWorker = profiles.filter(function (p) { return p.worker_deployed; });
+  const withToken = profiles.length - withoutToken.length;
+  const tunnelText = tunnel.status && tunnel.status !== 'unknown' ? tunnel.status : 'belum terbaca';
 
-  ui.dbTiles.replaceChildren(
-    tile('Helper root',
-      helper.installed ? 'Terpasang' : 'Belum',
-      helper.installed ? (countOf(helper.pending) ? countOf(helper.pending) + ' request tertunda' : 'tidak ada request tertunda') : 'aksi Server tidak aktif',
-      helper.installed ? 'ok' : 'bad'),
-    tile('Profil Cloudflare', String(profiles.length),
-      active ? 'aktif: ' + active.id : 'belum ada profil aktif',
-      profiles.length ? (active ? 'ok' : 'warn') : 'warn'),
-    tile('Routing domain', routed.length + '/' + domains.length,
-      domains.length ? 'catch-all menuju Worker' : 'belum ada domain terdaftar',
+  ui.dbStrip.replaceChildren(
+    pill('helper', helper.installed ? 'siap' : 'belum', helper.installed ? 'ok' : 'bad'),
+    pill('profil', profiles.length ? String(profiles.length) : 'kosong', profiles.length ? 'ok' : 'bad'),
+    pill('token', withToken + '/' + profiles.length, withoutToken.length ? 'warn' : (profiles.length ? 'ok' : 'warn')),
+    pill('worker', withWorker.length ? 'ter-deploy' : 'belum', withWorker.length ? 'ok' : 'warn'),
+    pill('routing', routed.length + '/' + domains.length,
       domains.length && routed.length === domains.length ? 'ok' : 'warn'),
-    tile('API token', (profiles.length - withoutToken.length) + '/' + profiles.length,
-      withoutToken.length ? withoutToken.length + ' profil belum ada token' : (profiles.length ? 'semua profil siap' : 'belum ada profil'),
-      withoutToken.length ? 'warn' : (profiles.length ? 'ok' : 'warn')),
-    tile('Worker', withWorker.length ? 'Ter-deploy' : 'Belum',
-      withWorker.length ? withWorker.map(function (p) { return p.id; }).join(', ') : (cf && cf.worker_name) || '-',
-      withWorker.length ? 'ok' : 'warn'),
-    tile('Tunnel',
-      tunnel.status && tunnel.status !== 'unknown' ? tunnel.status : 'belum terbaca',
-      tunnel.error ? 'butuh API token, cek konektor di panel Tunnel' : (tunnel.web_host || 'web host belum diisi'),
-      tunnel.status === 'healthy' ? 'ok' : 'warn'),
+    pill('tunnel', tunnelText, tunnel.status === 'healthy' ? 'ok' : 'warn'),
+    pill('salinan', copies.length ? copies.length + ' alamat' : 'off', copies.length ? 'warn' : 'ok'),
+  );
+  ui.dbTiles.replaceChildren(
     tile('Inbox', String(countOf(db.inboxes)),
-      'pesan ' + countOf(db.messages) + ', lampiran ' + countOf(db.attachments)),
-    tile('Database', formatBytes(db.bytes), db.path || '-'),
-    tile('Aplikasi', formatUptime(app.uptime_seconds),
-      'RAM ' + formatMb(app.rss_bytes) + ', Go ' + (app.go_version || '-')),
-    tile('Salinan email', copies.length ? String(copies.length) + ' alamat' : 'OFF',
-      copies.length ? 'berlaku setelah deploy Worker' : 'tidak menyalin ke mana pun'),
+      'pesan ' + countOf(db.messages) + ' · lampiran ' + countOf(db.attachments)),
+    tile('Database', formatBytes(db.bytes), 'uptime ' + formatUptime(app.uptime_seconds)),
+    tile('RAM', formatMb(app.rss_bytes), 'Go ' + (app.go_version || '-')),
   );
   ui.dbDetails.hidden = false;
 
+  // Judul singkat; penjelasan panjang disimpan sebagai title agar tidak memenuhi layar.
   const alerts = [];
   if (!helper.installed) {
-    alerts.push(['bad', 'Helper root belum dipasang, jadi restart, backup, log, dan aksi tunnel tidak bisa dijalankan dari panel.', '#server', 'Buka Server']);
+    alerts.push(['bad', 'Helper root belum dipasang', '#server', 'Buka Server',
+      'Tanpa helper root, restart service, backup, log, dan aksi tunnel tidak bisa dijalankan dari panel.']);
   }
   if (!profiles.length) {
-    alerts.push(['warn', 'Belum ada profil Cloudflare, jadi tambah domain dan deploy Worker belum bisa dilakukan.', '#cloudflare', 'Tambah profil']);
+    alerts.push(['warn', 'Belum ada profil Cloudflare', '#cloudflare', 'Tambah profil',
+      'Tambah domain dan deploy Worker butuh profil Cloudflare beserta API token.']);
   }
   if (withoutToken.length) {
-    alerts.push(['warn', withoutToken.length + ' profil belum punya API token: ' + withoutToken.map(function (p) { return p.id; }).join(', ') + '.', '#cloudflare', 'Tempel token']);
+    alerts.push(['warn', 'API token belum ada: ' + withoutToken.map(function (p) { return p.id; }).join(', '),
+      '#cloudflare', 'Tempel token',
+      'Panel memakai API token profil untuk membaca dan mengubah Cloudflare.']);
   }
   const notRouted = domains.filter(function (d) { return !d.routing; });
   if (notRouted.length) {
-    alerts.push(['warn', notRouted.length + ' domain belum routing aktif: ' + notRouted.map(function (d) { return d.domain; }).join(', ') + '.', '#domains', 'Aktifkan routing']);
+    alerts.push(['warn', 'Routing belum aktif: ' + notRouted.map(function (d) { return d.domain; }).join(', '),
+      '#domains', 'Buka domain',
+      'Catch-all Email Routing belum mengarah ke Worker, jadi email ke domain itu belum masuk inbox.']);
   }
   if (!tunnel.web_host) {
-    alerts.push(['warn', 'Web host tunnel belum diisi, Worker akan mengirim ke URL kosong.', '#tunnel', 'Isi web host']);
+    alerts.push(['warn', 'Web host tunnel belum diisi', '#tunnel', 'Isi web host',
+      'Worker memakai web host sebagai TEMPMAIL_SERVER_URL; tanpa itu email tidak bisa dikirim ke server ini.']);
   }
   if (tunnel.error) {
-    alerts.push(['warn', 'Info tunnel dari Cloudflare API belum terbaca (' + tunnel.error + '). Konektor cloudflared di server tetap jalan: buktikan dengan tombol Cek konektor di panel Tunnel, tanpa perlu API token.', '#tunnel', 'Cek konektor']);
+    alerts.push(['warn', 'Tunnel: info Cloudflare belum terbaca', '#tunnel', 'Cek konektor',
+      tunnel.error + ' — konektor cloudflared di server tetap jalan; buktikan lewat tombol Cek konektor tanpa API token.']);
   }
   if (copies.length && !withWorker.length) {
-    alerts.push(['warn', 'Tujuan salinan sudah diset tapi belum ada Worker ter-deploy, jadi salinan belum dipakai.', '#copies', 'Lihat salinan']);
+    alerts.push(['warn', 'Salinan diset, Worker belum ada', '#copies', 'Lihat salinan',
+      'Tujuan salinan baru dipakai setelah Worker di-deploy untuk profil terkait.']);
   }
   if (cfError) {
-    alerts.push(['warn', 'Status Cloudflare tidak terbaca: ' + (cfError.message || cfError) + '.', '#diagnostics', 'Lihat Diagnostik']);
+    alerts.push(['warn', 'Status Cloudflare tidak terbaca', '#diagnostics', 'Lihat Diagnostik',
+      String(cfError.message || cfError)]);
   }
 
   if (alerts.length) {
     ui.dbAlerts.replaceChildren(...alerts.map(function (item) {
       const li = node('li', item[0], item[1]);
+      if (item[4]) li.title = item[4];
       li.append(panelLink(item[2], item[3]));
       return li;
     }));
@@ -1535,6 +2033,41 @@ function bindSections() {
     });
   });
 
+  ui.tnCnameBtn.addEventListener('click', function () {
+    run(ui.tnCnameBtn, ui.tunnelMsg, async function () {
+      const out = await createTunnelCname();
+      const info = tunnelCnameMessage(out);
+      message(ui.tunnelMsg, 'ok', info.text, info.detail);
+    });
+  });
+
+  ui.dcFixBtn.addEventListener('click', function () {
+    const current = state.domainCheck;
+    if (!current) return;
+    const task = run(ui.dcFixBtn, ui.domainCheckMsg, async function () {
+      const result = await applyDomainFix(current.domain, current.data);
+      let refreshErr = null;
+      try {
+        const fresh = await fetchDomainCheck(current.domain);
+        renderDomainCheck(fresh);
+      } catch (err) {
+        refreshErr = err;
+      }
+      await loadDomains();
+      if (refreshErr) {
+        const info = apiFailure(refreshErr);
+        showFixOutcome(current.domain, result.outcome, ui.domainCheckMsg);
+        message(ui.domainCheckMsg, 'error', 'Rapikan selesai, pemeriksaan ulang gagal: ' + info.message,
+          info.detail + (info.detail ? ' | ' : '') + fixOutcomeLines(result.outcome).join(' | '));
+      } else {
+        showFixOutcome(current.domain, result.outcome, ui.domainCheckMsg);
+      }
+    });
+    task.then(function () {
+      ui.dcFixBtn.disabled = !state.domainCheck || state.domainCheck.keys.length === 0;
+    });
+  });
+
   ui.copiesForm.addEventListener('submit', function (event) {
     event.preventDefault();
     const destinations = ui.cpInput.value.split(',').map(function (part) { return part.trim(); }).filter(Boolean);
@@ -1646,6 +2179,12 @@ function bindSections() {
   ui.dgReloadBtn.addEventListener('click', function () { run(ui.dgReloadBtn, ui.dgMsg, loadDiagnostics); });
 }
 
+function bindSetup() {
+  ui.stCheckAllBtn.addEventListener('click', function () {
+    run(ui.stCheckAllBtn, ui.setupMsg, checkSetupAll);
+  });
+}
+
 function boot() {
   if (!API.token) {
     window.location.href = '/app/login.html';
@@ -1662,6 +2201,7 @@ function boot() {
   ui.imState.className = 'state empty';
   ui.imState.replaceChildren(node('span', 'state-text', 'Belum ada impor dijalankan. Tempel isi cloudflare-state.json lalu tekan Impor state.'));
   bindServer();
+  bindSetup();
   applyHelperGate();
   // Satu kunjungan panel dulu menembak sebelas endpoint sekaligus dan bisa kena batas
   // permintaan per menit. Sekarang hanya Dashboard yang memuat data di awal; panel lain
@@ -1673,6 +2213,7 @@ function boot() {
 }
 
 const panelLoaders = {
+  setup: loadSetup,
   cloudflare: loadProfiles,
   domains: loadDomains,
   tunnel: loadTunnel,

@@ -404,9 +404,12 @@ Every route below lives under `/api/admin/cloudflare` and requires role `admin`.
 | POST | `/domains` | `{"domain","profile"?}` | created domain |
 | DELETE | `/domains/{domain}` | - | `{"deleted":true,"cloudflare_untouched":true}` |
 | POST | `/domains/{domain}/routing` | `{"routing":true,"unlock_dns":true}` | updated domain |
+| GET | `/domains/{domain}/check` | - | readiness checklist (zone, Worker, routing, Email DNS, web-host CNAME) |
+| POST | `/domains/{domain}/fix` | `{"cname"?,"routing"?,"worker"?,"email_dns"?,"overwrite_cname"?}` | `{"done":[...],"skipped":[...],"failed":[...]}` |
 | GET | `/tunnel` | - | tunnel status |
 | PUT | `/tunnel` | `{"web_host","name"}` | tunnel status |
 | POST | `/tunnel/create` | `{"name","web_host"}` | tunnel id, connector token, install commands |
+| POST | `/tunnel/cname` | `{}` | ensures the web-host CNAME: `{"web_host","expected","created","existing","zone"}` |
 | GET | `/copies` | - | `{"destinations":[...]}` |
 | PUT | `/copies` | `{"destinations":[...]}` | destinations plus profiles that need a redeploy |
 | POST | `/import` | `{"state":{...}}` | counts imported from an old state file |
@@ -416,6 +419,33 @@ Every route below lives under `/api/admin/cloudflare` and requires role `admin`.
 **Tunnel shape:** `{"name","id","web_host","status","connections","account_id","source","error"}`.
 **`/status`** adds `active_profile`, `copies`, `worker_name`, `worker_compat_date`, `env_domains`, `api_base`.
 
+**`/domains/{domain}/check` shape:**
+
+```json
+{"domain":"x.tld","profile":"cf-a",
+ "zone":{"id":"...","name":"x.tld","status":"active"},
+ "worker":{"name":"tempmailbyjhopanstore","deployed":true},
+ "routing":{"enabled":true,"target":"tempmailbyjhopanstore","ok":true},
+ "email_dns":{"ready":true,
+              "missing":[{"type":"MX","name":"x.tld","content":"route1.mx.cloudflare.net","priority":1}],
+              "conflicts":[{"type":"MX","name":"x.tld","content":"mail.other.tld","priority":5}]},
+ "web_host":{"configured":true,"host":"mail.example.tld","expected":"<tunnel-id>.cfargotunnel.com",
+             "zone":{"id":"...","name":"example.tld","status":"active"},
+             "records":[{"type":"CNAME","name":"mail.example.tld","content":"<tunnel-id>.cfargotunnel.com","proxied":true}],
+             "ok":true},
+ "issues":[{"key":"cname","level":"warn","message":"...","fixable":true}]}
+```
+
+`issues[].level` is `ok`, `warn`, or `bad`; `fixable:true` only appears for `worker`, `routing`,
+`email_dns`, and `cname`. A failing Cloudflare call is reported as an issue with the raw message
+rather than a `5xx`, so one broken call never hides the rest of the checklist.
+
+**`/domains/{domain}/fix`** only touches what is selected: `worker` redeploys the Worker for that
+domain's profile, `routing` enables Email Routing and points the catch-all at the Worker, `email_dns`
+creates missing Email Routing records, and `cname` creates the web-host CNAME. It never deletes a
+record, and an existing CNAME with a different target is skipped unless `overwrite_cname` is true.
+`mx_conflict` is reported and never fixed: a non-Cloudflare MX must be removed by the owner.
+
 **Errors:** `{"error":"short message","detail":"raw Cloudflare message"}`. The Cloudflare
 detail is always forwarded, so a rejected token, a pending zone, or a non-Cloudflare MX setup
 shows the real reason instead of a silent failure.
@@ -423,6 +453,8 @@ shows the real reason instead of a silent failure.
 **Behaviour worth knowing:**
 
 - Adding a domain resolves its zone with the profile token and refuses zones that are missing or not `active`.
+- Adding a domain from a **different Cloudflare account** is the same flow with a second profile: create the profile, then add the domain and select that profile. The Worker is uploaded per profile, so every profile needs its own `deploy-worker` before its domains can route.
+- DNS writes are additive only: `POST /tunnel/cname` and the `cname`/`email_dns` parts of `POST /domains/{domain}/fix` create what is missing. No endpoint deletes DNS records.
 - `routing:true` enables Email Routing, optionally unlocks DNS records (`unlock_dns`), then sets the catch-all to the Worker. `routing:false` disables the catch-all only.
 - Deleting a domain removes it from TempMail only; Cloudflare DNS, zone, and routing stay untouched.
 - `deploy-worker` uploads the embedded Worker script and sets `TEMPMAIL_SERVER_URL`, `TEMPMAIL_API_KEY`, and `FORWARD_LIST` as Worker secrets. No `wrangler` or Node.js is needed on the host.

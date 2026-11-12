@@ -33,6 +33,7 @@ No Maddy, PostgreSQL, Node.js runtime, Nginx, or public port 25 is required for 
 | `receiver/api` | Gin routes, CORS, SSE handler/rate limits |
 | `receiver/events` | shared SSE broker; exists to prevent `api ↔ handlers` import cycle |
 | `receiver/handlers` | inbox, message, attachment, admin bootstrap, HTTP email receive |
+| `receiver/cloudflare` | Cloudflare REST client: zones, Email Routing, DNS records, Worker deploy, tunnel |
 | `receiver/smtp` | direct/local SMTP ingestion |
 | `receiver/parser` | RFC822/MIME parsing |
 | `receiver/repository` | SQL operations; DB-dialect placeholders |
@@ -98,7 +99,10 @@ GET    /sse/:email?token=JWT
 /api/admin/cloudflare/profiles/:id/worker
 /api/admin/cloudflare/domains[/:domain]   admin JWT
 /api/admin/cloudflare/domains/:domain/routing
+/api/admin/cloudflare/domains/:domain/check    admin JWT (read-only readiness checklist)
+/api/admin/cloudflare/domains/:domain/fix      admin JWT (additive repair, never deletes DNS)
 /api/admin/cloudflare/tunnel[/create]     admin JWT
+/api/admin/cloudflare/tunnel/cname        admin JWT (ensures the web-host CNAME)
 /api/admin/cloudflare/copies              admin JWT
 /api/admin/cloudflare/import              admin JWT
 /api/admin/system/status                  admin JWT
@@ -184,6 +188,7 @@ Rules that keep this safe:
 - Static assets under `/app` are served with `Cache-Control: no-cache, must-revalidate`, and every panel in `admin.html` is `hidden` except the default one, so a stale cached page cannot render as an empty screen when `admin-nav.js` asks for a panel it does not have. If a panel is missing from the markup, the panel script shows a notice and reloads once.
 - The Cloudflare zone overrides asset caching with `max-age=14400` for JS/CSS, so **bump `?v=N` in `index.html` and `admin.html` on every JS change**; otherwise a browser can keep an old script for four hours even though the origin already served the new one.
 - The tunnel hostname is web/API transport. It is not necessarily a temp-mail domain.
+- Cloudflare DNS writes from the app are additive only (create what is missing). Removing a DNS record, a zone, or Email Routing stays a human decision, and a non-Cloudflare MX is reported as a conflict instead of being deleted.
 - Email copies must remain optional and off by default.
 
 ## Platform support state

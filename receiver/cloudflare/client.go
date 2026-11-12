@@ -309,6 +309,19 @@ func (c *Client) DeleteWorker(accountID, name string) error {
 	return err
 }
 
+// WorkerScript reports whether the account already holds a Worker script with that name, so a
+// stored deploy flag can be checked against Cloudflare instead of being trusted.
+func (c *Client) WorkerScript(accountID, name string) (bool, error) {
+	path := "/accounts/" + url.PathEscape(accountID) + "/workers/scripts/" + url.PathEscape(name)
+	if _, err := c.doJSON(http.MethodGet, path, nil); err != nil {
+		if hasStatus(err, http.StatusNotFound) {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
+}
+
 type tunnelPayload struct {
 	ID        string `json:"id"`
 	Name      string `json:"name"`
