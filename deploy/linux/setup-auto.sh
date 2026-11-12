@@ -1,97 +1,454 @@
 #!/usr/bin/env bash
-# TempMail one-shot Cloudflare setup (Linux target). Run as root on the device.
-# Auth: wrangler login (OAuth) + cloudflared tunnel login. No API token needed.
-# Usage: bash setup-auto.sh <domain> [web-host]
-# Example: bash setup-auto.sh jhopanstore.my.id tempmail.jhopanstore.my.id
+# TempMail one-shot setup (Linux target). Kontrol Cloudflare penuh lewat API token milik
+# profil di database aplikasi: tanpa login browser, tanpa CLI Node.js, tanpa prompt.
+# Usage: bash setup-auto.sh --domain <domain> [--web-host <host>] --account-id <id> --api-token <token>
+# Env  : DOMAIN, WEB_HOST, CLOUDFLARE_ACCOUNT_ID, CLOUDFLARE_API_TOKEN (dipakai kalau flag kosong)
+# Contoh: bash setup-auto.sh --domain jhopanstore.my.id --web-host tempmail.jhopanstore.my.id \
+#           --account-id 0123456789abcdef0123456789abcdef --api-token cf-token
 set -euo pipefail
 
-[ "$(id -u)" = 0 ] || { echo "Run as root"; exit 1; }
-[ $# -ge 1 ] || { echo "Usage: $0 <domain> [web-host]"; exit 1; }
-
-DOMAIN=$1; WEB_HOST=${2:-tempmail.$1}
-TUNNEL_NAME=tempmail-jhopanstore
-STATE=/etc/tempmail/cloudflare-state.json
 APP_ENV=/etc/tempmail/tempmail.env
-WORKER_DIR=/opt/tempmail/worker
+APP_BIN=/opt/tempmail/tempmail
+TUNNEL_NAME=tempmailbyjhopanstore
+PROFILE_ID=cf-main
 
-echo "== 1/7 Wrangler login (buka URL di browser, klik Allow) =="
-npx wrangler whoami >/dev/null 2>&1 || npx wrangler login
-ACCOUNT_ID=$(npx wrangler whoami 2>/dev/null | grep -oE '[a-f0-9]{32}' | head -1)
-[ -n "$ACCOUNT_ID" ] || { echo "Gagal ambil Account ID dari wrangler whoami"; exit 1; }
-echo "Account ID: $ACCOUNT_ID"
+JWT=""
+API_CODE=""
+API_BODY=""
+FAILED=0
 
-echo "== 2/7 Tunnel login (buka URL di browser, klik Authorize) =="
-[ -f /root/.cloudflared/cert.pem ] || cloudflared tunnel login
+die() { echo "ERROR: $*" >&2; exit 1; }
 
-echo "== 3/7 Create tunnel + ingress + DNS route =="
-TUNNEL_ID=$(cloudflared tunnel list --output json 2>/dev/null | python3 -c 'import json,sys
-for t in json.load(sys.stdin):
-    if t["name"]=="'"$TUNNEL_NAME"'": print(t["id"]); break' || true)
-if [ -z "${TUNNEL_ID:-}" ]; then
-  cloudflared tunnel create "$TUNNEL_NAME"
-  TUNNEL_ID=$(cloudflared tunnel list --output json | python3 -c 'import json,sys
-for t in json.load(sys.stdin):
-    if t["name"]=="'"$TUNNEL_NAME"'": print(t["id"]); break')
-fi
-APP_PORT=$(grep '^PORT=' "$APP_ENV" | cut -d= -f2); APP_PORT=${APP_PORT:-8080}
-cat >/etc/cloudflared/config.yml <<EOF
-tunnel: $TUNNEL_ID
-credentials-file: /root/.cloudflared/$TUNNEL_ID.json
-ingress:
-  - hostname: $WEB_HOST
-    service: http://127.0.0.1:$APP_PORT
-  - service: http_status:404
-EOF
-cloudflared tunnel route dns "$TUNNEL_NAME" "$WEB_HOST"
-cloudflared service install 2>/dev/null || true
-systemctl enable --now cloudflared
+usage() {
+  cat <<'TXT'
+Usage: bash setup-auto.sh --domain <domain> [--web-host <host>] \
+         --account-id <id> --api-token <token>
 
-echo "== 4/7 Deploy worker + secrets =="
-set -a; . "$APP_ENV"; set +a
-KEYVAR="EMAIL_""API_KEY"
-API_KEY="***"
-(cd "$WORKER_DIR" \
-  && export CLOUDFLARE_ACCOUNT_ID="$ACCOUNT_ID" \
-  && printf '%s\n' "https://$WEB_HOST" | npx wrangler secret put TEMPMAIL_SERVER_URL \
-  && printf '%s\n' "$API_KEY" | npx wrangler secret put TEMPMAIL_API_KEY \
-  && printf '%s\n' "" | npx wrangler secret put FORWARD_LIST \
-  && npx wrangler deploy)
+Flag:
+  --domain      domain temp mail, misalnya domainkamu.com
+  --web-host    host panel, default tempmail.<domain>
+  --account-id  Cloudflare Account ID
+  --api-token   Cloudflare API token, permission:
+                Account Settings:Read, Zone:Read, Email Routing Rules:Edit,
+                Workers Scripts:Edit, dan Cloudflare Tunnel:Edit bila perlu tunnel baru
 
-echo "== 5/7 Enable Email Routing + DNS unlock =="
-npx wrangler email routing enable "$DOMAIN" || true
-npx wrangler email routing dns unlock "$DOMAIN" || true
+Bisa juga lewat env: DOMAIN, WEB_HOST, CLOUDFLARE_ACCOUNT_ID, CLOUDFLARE_API_TOKEN
+TXT
+}
 
-echo "== 6/7 Set catch-all rule -> worker =="
-npx wrangler email routing rules update "$DOMAIN" catch-all \
-  --name "TempMail catch-all" --enabled \
-  --action-type worker --action-value tempmailbyjhopanstore
+[ "$(id -u)" = 0 ] || die "Jalankan sebagai root: sudo bash setup-auto.sh --domain ..."
 
-echo "== 7/7 Activate domain + verify =="
-install -d -o root -g root -m 0700 /etc/tempmail
-[ -f "$STATE" ] || printf '{"active_profile":"","profiles":{},"domains":{},"tunnel":{"id":"","account":"","web_hosts":[]}}\n' >"$STATE"
-D="$DOMAIN" T="$TUNNEL_ID" W="$WEB_HOST" A="$ACCOUNT_ID" python3 - "$STATE" <<'PY'
+DOMAIN=${DOMAIN:-}
+WEB_HOST=${WEB_HOST:-}
+ACCOUNT_ID=${ACCOUNT_ID:-}
+CF_TOKEN=${CF_TOKEN:-}
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --domain)
+      [ $# -ge 2 ] || die "Flag --domain butuh nilai."
+      DOMAIN=$2; shift 2 ;;
+    --web-host)
+      [ $# -ge 2 ] || die "Flag --web-host butuh nilai."
+      WEB_HOST=$2; shift 2 ;;
+    --account-id)
+      [ $# -ge 2 ] || die "Flag --account-id butuh nilai."
+      ACCOUNT_ID=$2; shift 2 ;;
+    --api-token)
+      [ $# -ge 2 ] || die "Flag --api-token butuh nilai."
+      CF_TOKEN=$2; shift 2 ;;
+    -h|--help)
+      usage; exit 0 ;;
+    *)
+      usage
+      die "Argumen tidak dikenal: $1" ;;
+  esac
+done
+ACCOUNT_ID=${ACCOUNT_ID:-${CLOUDFLARE_ACCOUNT_ID:-}}
+CF_TOKEN=${CF_TOKEN:-${CLOUDFLARE_API_TOKEN:-}}
+[ -n "$DOMAIN" ] || { usage; die "Domain wajib diisi lewat --domain atau env DOMAIN."; }
+[ -n "$ACCOUNT_ID" ] || { usage; die "Account ID wajib diisi lewat --account-id atau env CLOUDFLARE_ACCOUNT_ID."; }
+[ -n "$CF_TOKEN" ] || { usage; die "API token wajib diisi lewat --api-token atau env CLOUDFLARE_API_TOKEN."; }
+
+echo "=============================================="
+echo "  TempMail By JhopanStore - One Shot Setup"
+echo "        Credit JhopanStore"
+echo "=============================================="
+
+APP_PORT=$(grep '^PORT=' "$APP_ENV" 2>/dev/null | cut -d= -f2 || true)
+APP_PORT=${APP_PORT:-8080}
+APP_URL="http://127.0.0.1:$APP_PORT"
+
+# api_call METHOD PATH [JSON] [quiet]
+# Semua panggilan HTTP lewat sini. Status disimpan di API_CODE/API_BODY.
+# Non-2xx: cetak error + detail dari aplikasi (kecuali mode quiet), return non-zero.
+api_call() {
+  local method=$1 path=$2 payload=${3:-} mode=${4:-}
+  local out
+  local -a args=(-sS -m 120 -X "$method" -w '\n%{http_code}')
+  if [ -n "$JWT" ]; then
+    args+=(-H "Authorization: Bearer $JWT")
+  fi
+  if [ -n "$payload" ]; then
+    args+=(-H 'Content-Type: application/json' --data "$payload")
+  fi
+  out=$(curl "${args[@]}" "$APP_URL$path" || true)
+  API_CODE=${out##*$'\n'}
+  API_BODY=${out%$'\n'*}
+  case "$API_CODE" in
+    2*) return 0 ;;
+  esac
+  if [ "$mode" != quiet ]; then
+    api_show_error "$method" "$path"
+  fi
+  return 1
+}
+
+# api_show_error METHOD PATH: cetak pesan error aplikasi beserta detail mentah Cloudflare.
+api_show_error() {
+  echo "GAGAL [$1 $2] HTTP ${API_CODE:-000}"
+  if [ -z "$API_BODY" ]; then
+    echo "  Tidak ada respons dari aplikasi. Cek: systemctl status tempmail"
+    return 0
+  fi
+  printf '%s' "$API_BODY" | python3 -c '
+import json, sys
+raw = sys.stdin.read()
+try:
+    data = json.loads(raw)
+except Exception:
+    print("  " + raw[:400].strip())
+    raise SystemExit(0)
+if isinstance(data, dict) and (data.get("error") or data.get("detail")):
+    for key in ("error", "detail"):
+        if data.get(key):
+            print("  " + key + ": " + str(data[key]))
+else:
+    print("  " + raw[:400].strip())
+' 2>/dev/null || echo "  $API_BODY"
+}
+
+# json_get JSON key [key ...]: ambil nilai dari respons, kosong kalau tidak ada.
+json_get() {
+  python3 -c '
+import json, sys
+try:
+    node = json.loads(sys.argv[1])
+except Exception:
+    raise SystemExit(0)
+for key in sys.argv[2:]:
+    if isinstance(node, dict):
+        node = node.get(key)
+    elif isinstance(node, list) and key.isdigit() and int(key) < len(node):
+        node = node[int(key)]
+    else:
+        node = None
+    if node is None:
+        raise SystemExit(0)
+print(node if not isinstance(node, (dict, list)) else json.dumps(node))
+' "$@" 2>/dev/null || true
+}
+
+json_body() {
+  # json_body KEY=value ...: bikin JSON objek.
+  #   nilai diawali @  -> dibaca dari environment (supaya token tidak muncul di argv)
+  #   KEY:raw=literal  -> nilai JSON apa adanya, misalnya true
+  python3 -c '
 import json, os, sys
-d = json.load(open(sys.argv[1]))
-d['active_profile'] = 'wrangler-oauth'
-d['profiles']['wrangler-oauth'] = {'label': 'wrangler OAuth', 'account_id': os.environ['A'],
-                                   'token': '', 'worker_deployed': True}
-d['domains'][os.environ['D']] = {'profile': 'wrangler-oauth', 'zone_id': '',
-                                 'enabled': True, 'routing': True}
-d['tunnel'].update({'id': os.environ['T'], 'web_host': os.environ['W'], 'account': 'cf tunnel'})
-open(sys.argv[1], 'w').write(json.dumps(d, indent=2) + '\n')
-PY
-chmod 600 "$STATE"
-tmp=$(mktemp)
-grep -v '^DOMAINS=' "$APP_ENV" >"$tmp" || true
-printf 'DOMAINS=%s\n' "$DOMAIN" >>"$tmp"
-install -o root -g tempmail -m 0640 "$tmp" "$APP_ENV"; rm -f "$tmp"
-systemctl restart tempmail
-sleep 2
-curl -fsS "http://127.0.0.1:${APP_PORT}/health" >/dev/null && echo "Local OK"
-curl -fsS "https://$WEB_HOST/health" && echo && echo "Tunnel OK"
+out = {}
+for pair in sys.argv[1:]:
+    key, _, value = pair.partition("=")
+    if key.endswith(":raw"):
+        if value != "":
+            out[key[:-4]] = json.loads(value)
+        continue
+    if value.startswith("@"):
+        value = os.environ.get(value[1:], "")
+    if value != "":
+        out[key] = value
+print(json.dumps(out))
+' "$@" 2>/dev/null || true
+}
+
+login_help() {
+  echo
+  echo "Set atau reset kredensial admin lewat menu:"
+  echo "  sudo tempmailctl  ->  A (Kelola admin)  ->  3 (Reset password admin)"
+  echo "Setelah itu jalankan skrip ini lagi."
+}
+
+connector_help() {
+  echo "Konektor juga bisa dipasang ulang dari panel admin:"
+  echo "  https://$WEB_HOST/admin  ->  bagian Tunnel  ->  tombol Pasang/Update"
+  echo "Kalau masih belum bisa: hapus tunnel $TUNNEL_NAME di dashboard Cloudflare"
+  echo "(Zero Trust -> Networks -> Tunnels), lalu jalankan skrip ini lagi."
+}
+
+# install_connector JSON: jalankan perintah root dari aplikasi satu per satu.
+install_connector() {
+  local body=$1 cmd shown i=0 failed=0
+  echo "Menjalankan perintah konektor dari aplikasi (token konektor tidak dicetak):"
+  while IFS= read -r cmd; do
+    [ -n "$cmd" ] || continue
+    case "$cmd" in
+      \#*) echo "  info:${cmd#\#}"; continue ;;
+    esac
+    i=$((i + 1))
+    shown=$cmd
+    case "$cmd" in
+      *"cloudflared service install "*) shown="${cmd%%cloudflared service install *}cloudflared service install <token-konektor disembunyikan>" ;;
+    esac
+    echo "  [$i] $shown"
+    if ! bash -c "${cmd#sudo }"; then
+      case "$cmd" in
+        *"systemctl status"*) echo "  (perintah status gagal, tidak masalah)" ;;
+        *) echo "  PERINGATAN: perintah di atas gagal."; failed=1 ;;
+      esac
+    fi
+  done < <(printf '%s' "$body" | python3 -c '
+import json, sys
+try:
+    data = json.load(sys.stdin)
+except Exception:
+    data = {}
+for command in data.get("commands", []) or []:
+    print(command)
+' 2>/dev/null || true)
+  if [ "$failed" = 0 ] && systemctl is-active --quiet cloudflared; then
+    echo "Konektor cloudflared aktif."
+    return 0
+  fi
+  echo "Service cloudflared belum aktif. Jalankan perintah ini sebagai root"
+  echo "PERINGATAN: teks di bawah memuat token konektor, jangan dibagikan atau disimpan di chat:"
+  printf '%s' "$body" | python3 -c '
+import json, sys
+try:
+    data = json.load(sys.stdin)
+except Exception:
+    data = {}
+for command in data.get("commands", []) or []:
+    print("  " + command)
+' 2>/dev/null || true
+  connector_help
+  return 1
+}
 
 echo
-echo "SELESAI."
-echo "Web   : https://$WEB_HOST/app/"
-echo "Email : apa-aja@$DOMAIN -> Worker -> Tunnel -> TempMail"
-echo "Test  : kirim email dari Gmail ke alamat acak @$DOMAIN, cek https://$WEB_HOST/app/"
+echo "== [1/7] Periksa prasyarat =="
+[ -f "$APP_ENV" ] || die "$APP_ENV tidak ada. Jalankan deploy/linux/install.sh dulu."
+[ -x "$APP_BIN" ] || die "$APP_BIN tidak ada. Jalankan deploy/linux/install.sh dulu."
+MISSING=""
+command -v python3 >/dev/null 2>&1 || MISSING="$MISSING python3"
+command -v curl >/dev/null 2>&1 || MISSING="$MISSING curl"
+if [ -n "$MISSING" ]; then
+  echo "Install paket yang kurang:$MISSING"
+  apt-get update -qq
+  # shellcheck disable=SC2086
+  apt-get install -y -qq $MISSING ca-certificates
+fi
+if ! command -v cloudflared >/dev/null 2>&1; then
+  echo "Install cloudflared dari paket GitHub..."
+  arch=$(dpkg --print-architecture)
+  case "$arch" in
+    arm64) pkg=cloudflared-linux-arm64.deb ;;
+    amd64) pkg=cloudflared-linux-amd64.deb ;;
+    *) die "Arsitektur tidak didukung: $arch" ;;
+  esac
+  curl -fsSL "https://github.com/cloudflare/cloudflared/releases/latest/download/$pkg" -o /tmp/cf.deb
+  dpkg -i /tmp/cf.deb
+  rm -f /tmp/cf.deb
+fi
+if ! curl -fsS --max-time 5 "$APP_URL/health" >/dev/null 2>&1; then
+  echo "Aplikasi belum menjawab di $APP_URL, coba start service tempmail..."
+  systemctl restart tempmail >/dev/null 2>&1 || true
+  for _ in $(seq 1 15); do
+    curl -fsS --max-time 5 "$APP_URL/health" >/dev/null 2>&1 && break
+    sleep 1
+  done
+fi
+curl -fsS --max-time 5 "$APP_URL/health" >/dev/null 2>&1 || die "Aplikasi tidak hidup di $APP_URL. Cek: systemctl status tempmail"
+echo "Aplikasi hidup di $APP_URL"
+echo "cloudflared $(cloudflared --version 2>&1 | head -1)"
+
+echo
+echo "== [2/7] Kredensial Cloudflare =="
+DOMAIN=$(printf '%s' "$DOMAIN" | sed -E 's#^https?://##; s#/+$##' | tr 'A-Z' 'a-z')
+WEB_HOST=$(printf '%s' "${WEB_HOST:-}" | sed -E 's#^https?://##; s#/+$##' | tr 'A-Z' 'a-z')
+WEB_HOST=${WEB_HOST:-tempmail.$DOMAIN}
+ACCOUNT_ID=$(printf '%s' "$ACCOUNT_ID" | tr -d '[:space:]')
+[ -n "$DOMAIN" ] || die "Domain kosong setelah dibersihkan."
+[ -n "$ACCOUNT_ID" ] || die "Account ID kosong."
+echo "Domain : $DOMAIN"
+echo "Web    : https://$WEB_HOST"
+echo "Tunnel : $TUNNEL_NAME"
+echo "Profil : $PROFILE_ID"
+# Diekspor hanya sebentar supaya json_body bisa membacanya tanpa menaruh token di argv.
+export CF_TOKEN
+
+echo
+echo "== [3/7] Login ke aplikasi =="
+ADMIN_EMAIL=$(grep '^ADMIN_EMAIL=' "$APP_ENV" 2>/dev/null | cut -d= -f2- || true)
+ADMIN_PASS=$(grep '^ADMIN_PASS=' "$APP_ENV" 2>/dev/null | cut -d= -f2- || true)
+if [ -z "$ADMIN_EMAIL" ] || [ -z "$ADMIN_PASS" ]; then
+  echo "ADMIN_EMAIL/ADMIN_PASS belum ada di $APP_ENV."
+  login_help
+  exit 1
+fi
+LOGIN_BODY=$(TM_EMAIL="$ADMIN_EMAIL" TM_PASS="$ADMIN_PASS" python3 -c 'import json, os
+print(json.dumps({"email": os.environ["TM_EMAIL"], "password": os.environ["TM_PASS"]}))' 2>/dev/null || true)
+if ! api_call POST /api/auth/login "$LOGIN_BODY" quiet; then
+  echo "Login admin gagal, kredensial di $APP_ENV ditolak:"
+  LOGIN_BODY=""
+  api_show_error POST /api/auth/login
+  login_help
+  exit 1
+fi
+JWT=$(json_get "$API_BODY" token)
+LOGIN_BODY=""
+[ -n "$JWT" ] || { echo "Respons login tidak memuat token."; login_help; exit 1; }
+echo "Login OK (JWT hanya hidup di variabel skrip ini)."
+
+echo
+echo "== [4/7] Profil Cloudflare ($PROFILE_ID) =="
+PROFILE_BODY=$(json_body "id=$PROFILE_ID" "label=Cloudflare API token" "account_id=$ACCOUNT_ID" "token=@CF_TOKEN" "activate:raw=true")
+if api_call POST /api/admin/cloudflare/profiles "$PROFILE_BODY" quiet; then
+  echo "Profil $PROFILE_ID dibuat dan langsung diaktifkan."
+else
+  if [ "$API_CODE" = 409 ]; then
+    echo "Profil $PROFILE_ID sudah ada, putar token dan Account ID-nya."
+    UPDATE_BODY=$(json_body "account_id=$ACCOUNT_ID" "token=@CF_TOKEN")
+    api_call PUT "/api/admin/cloudflare/profiles/$PROFILE_ID" "$UPDATE_BODY" || die "Gagal memperbarui profil $PROFILE_ID."
+    api_call POST "/api/admin/cloudflare/profiles/$PROFILE_ID/activate" "" quiet || echo "Peringatan: profil $PROFILE_ID tidak bisa diaktifkan."
+    echo "Profil $PROFILE_ID diperbarui."
+  else
+    api_show_error POST /api/admin/cloudflare/profiles
+    echo "Periksa Account ID dan permission API token di atas."
+    exit 1
+  fi
+fi
+PROFILE_BODY=""
+UPDATE_BODY=""
+unset CF_TOKEN
+
+echo
+echo "== [5/7] Tunnel + konektor =="
+TUNNEL_BODY=$(json_body "name=$TUNNEL_NAME" "web_host=$WEB_HOST")
+TUNNEL_ID=""
+if api_call POST /api/admin/cloudflare/tunnel/create "$TUNNEL_BODY" quiet; then
+  TUNNEL_ID=$(json_get "$API_BODY" id)
+  echo "Tunnel $TUNNEL_NAME siap dipakai."
+  install_connector "$API_BODY" || FAILED=1
+else
+  CREATE_CODE=$API_CODE
+  CREATE_BODY=$API_BODY
+  if api_call GET /api/admin/cloudflare/tunnel "" quiet; then
+    TUNNEL_ID=$(json_get "$API_BODY" id)
+  fi
+  if [ -z "$TUNNEL_ID" ]; then
+    API_CODE=$CREATE_CODE
+    API_BODY=$CREATE_BODY
+    api_show_error POST /api/admin/cloudflare/tunnel/create
+    echo "Periksa permission API token (butuh Cloudflare Tunnel:Edit) dan Account ID."
+    exit 1
+  fi
+  if systemctl is-active --quiet cloudflared; then
+    echo "Tunnel $TUNNEL_NAME sudah ada dan konektor cloudflared aktif."
+  else
+    echo "Tunnel $TUNNEL_NAME sudah ada, tapi service cloudflared tidak aktif."
+    API_CODE=$CREATE_CODE
+    API_BODY=$CREATE_BODY
+    api_show_error POST /api/admin/cloudflare/tunnel/create
+    connector_help
+    FAILED=1
+  fi
+fi
+TUNNEL_PUT=$(json_body "web_host=$WEB_HOST" "name=$TUNNEL_NAME" "id=${TUNNEL_ID:-}")
+api_call PUT /api/admin/cloudflare/tunnel "$TUNNEL_PUT" || die "Gagal menyimpan pengaturan tunnel ke panel."
+TUNNEL_BODY=""
+TUNNEL_PUT=""
+echo "Panel sekarang mencatat tunnel $TUNNEL_NAME untuk web host $WEB_HOST."
+
+echo
+echo "== [6/7] Domain + Email Routing =="
+DOMAIN_BODY=$(json_body "domain=$DOMAIN")
+if api_call POST /api/admin/cloudflare/domains "$DOMAIN_BODY" quiet; then
+  echo "Domain $DOMAIN terdaftar dan zone-nya ditemukan."
+else
+  if [ "$API_CODE" = 409 ]; then
+    echo "Domain $DOMAIN sudah terdaftar, lanjut ke Email Routing."
+  else
+    api_show_error POST /api/admin/cloudflare/domains
+    echo "Pastikan domain ada di akun Cloudflare dengan Account ID di atas"
+    echo "dan status zone-nya Active, lalu jalankan skrip ini lagi."
+    exit 1
+  fi
+fi
+if api_call POST "/api/admin/cloudflare/domains/$DOMAIN/routing" '{"routing":true,"unlock_dns":true}' quiet; then
+  echo "Email Routing aktif dan catch-all diarahkan ke Worker."
+else
+  api_show_error POST "/api/admin/cloudflare/domains/$DOMAIN/routing"
+  echo "Yang perlu dibetulkan operator:"
+  echo "  1. Cek status zone $DOMAIN sudah Active (nameserver Cloudflare sudah dipakai)."
+  echo "  2. Hapus record MX lama yang bukan milik Cloudflare, misalnya mail.$DOMAIN."
+  echo "     Dashboard: https://dash.cloudflare.com -> $DOMAIN -> Email -> Email Routing."
+  echo "  3. Cek permission API token: Zone:Read dan Email Routing Rules:Edit."
+  echo "Setelah dibetulkan, jalankan skrip ini lagi."
+  FAILED=1
+fi
+
+echo
+echo "== [7/7] Deploy Worker + verifikasi =="
+WORKER_NAME=$(grep '^CF_WORKER_NAME=' "$APP_ENV" 2>/dev/null | cut -d= -f2- || true)
+WORKER_NAME=${WORKER_NAME:-tempmailbyjhopanstore}
+if api_call POST "/api/admin/cloudflare/profiles/$PROFILE_ID/deploy-worker" '{}' quiet; then
+  WORKER_DEPLOYED=$(json_get "$API_BODY" modified_on)
+  echo "Worker $WORKER_NAME terunggah (secrets: TEMPMAIL_SERVER_URL, TEMPMAIL_API_KEY, FORWARD_LIST)."
+  if [ -n "$WORKER_DEPLOYED" ]; then
+    echo "Versi Worker: $WORKER_DEPLOYED"
+  fi
+else
+  api_show_error POST "/api/admin/cloudflare/profiles/$PROFILE_ID/deploy-worker"
+  echo "Cek permission API token (Workers Scripts:Edit) dan web host tunnel di panel."
+  FAILED=1
+fi
+
+echo
+echo "Verifikasi:"
+if curl -fsS --max-time 10 "$APP_URL/health" >/dev/null 2>&1; then
+  echo "  Lokal /health          : OK"
+else
+  echo "  Lokal /health          : GAGAL (cek: systemctl status tempmail)"
+  FAILED=1
+fi
+if api_call GET /api/config "" quiet; then
+  echo "  Lokal /api/config      : OK"
+  case "$API_BODY" in
+    *"$DOMAIN"*) echo "  Domain di /api/config  : $DOMAIN terdaftar" ;;
+    *) echo "  Domain di /api/config  : $DOMAIN belum muncul, buka ulang setelah routing aktif" ;;
+  esac
+else
+  echo "  Lokal /api/config      : GAGAL"
+  api_show_error GET /api/config
+  FAILED=1
+fi
+if curl -fsS --max-time 15 "https://$WEB_HOST/health" >/dev/null 2>&1; then
+  echo "  Publik https://$WEB_HOST : OK"
+else
+  echo "  Publik https://$WEB_HOST : belum bisa dicek, pastikan CNAME $WEB_HOST -> tunnel aktif"
+fi
+
+echo
+echo "=============================================="
+if [ "$FAILED" = 0 ]; then
+  echo "  SELESAI"
+else
+  echo "  SELESAI SEBAGIAN - ada langkah yang gagal, baca pesan di atas"
+fi
+echo "  Domain  : $DOMAIN (Email Routing -> Worker $WORKER_NAME)"
+echo "  Worker  : $WORKER_NAME di akun $ACCOUNT_ID"
+echo "  Tunnel  : $TUNNEL_NAME -> http://127.0.0.1:$APP_PORT"
+echo "  Web     : https://$WEB_HOST/app/"
+echo "  Panel   : https://$WEB_HOST/admin"
+echo "  Email   : apa-aja@$DOMAIN -> Worker -> Tunnel -> TempMail"
+echo "  Test    : kirim email dari Gmail ke alamat acak @$DOMAIN"
+echo "=============================================="
+[ "$FAILED" = 0 ] || exit 1

@@ -287,6 +287,37 @@ Menu:
 
 ---
 
+## 🧭 Admin panel (web)
+
+Open `https://<web-host>/admin` (or `/app/admin.html`) and log in as an admin. The panel is not linked
+from the inbox UI on purpose: an admin types `/admin`, and every request still needs an admin JWT, so a
+regular user who finds the URL only sees a "not an admin account" notice.
+
+The panel uses a sidebar with one section at a time (deep links work, e.g. `/admin#server`):
+**Status**, **Server**, **Akun Cloudflare**, **Domain**, **Tunnel**, **Salinan email**, **Impor state**.
+
+Everything that used to need SSH plus `menutempmail` is available there, and it writes to the same
+records the menu uses (SQLite is the single source of truth):
+
+| Section | What it does |
+|---|---|
+| Cloudflare profiles | Add an account (ID, label, Account ID, API token), activate, delete, deploy/delete the Worker |
+| Domains | Add a domain (zone resolved with the profile token), enable/disable routing, unlock Cloudflare DNS records, delete from panel only |
+| Tunnel | Show tunnel name, ID, status, live connector count, web host; save web host/name; create a tunnel and get the connector token plus the root commands to install it |
+| Copies | Comma separated copy destinations (applied on the next Worker deploy) |
+| Import | Paste an old `cloudflare-state.json` to load existing profiles and domains once |
+| Server | Service status, restart service, backup now, journald logs, doctor checks, and tunnel install/restart/logout through the root helper |
+
+Notes:
+
+- API tokens are stored encrypted (AES-256-GCM, key derived from `JWT_SECRET`) and are never returned by the API.
+- Adding a domain takes effect immediately: the TempMail domain list comes from the database, so no service restart.
+- Cloudflare errors are shown verbatim (rejected token, zone not active, non-Cloudflare MX), instead of failing silently.
+- The panel never installs or restarts `cloudflared` itself. The app runs as the `tempmail` user, so those actions go through the root helper (`/usr/local/sbin/tempmail-root`, systemd `tempmail-root.path` + `.timer`): the app writes a validated request to a spool directory, the root helper executes an allowlisted action and writes the result back. No `sudoers`, no root for the app. Without the helper, the panel still works and says `helper belum dipasang`.
+- `menutempmail → 1/2/5/6/7` call the same API, so menu and panel never disagree.
+
+---
+
 ## 🌐 Multi-Domain Support
 
 TempMail supports **multiple domains** in one instance. Each domain can be on the **same Cloudflare account** or **different accounts**.
@@ -326,46 +357,32 @@ Only **3 steps**. No login, no tunnel, no worker re-deploy needed. Email Routing
 
 #### Case 2: Domain B on a DIFFERENT Cloudflare account
 
-This requires a **separate Worker** (each CF account has its own worker). But the **Tunnel stays shared** — no new tunnel needed for email.
+Each account gets its own profile and its own Worker; the **Tunnel stays shared**, so no new tunnel is needed for email.
 
-```bash
-# Step 1 — add domain B to config
-sudo nano /etc/tempmail/tempmail.env
-#   DOMAINS=domain-a.com,domain-b.com
-sudo systemctl restart tempmail
+Panel flow (`/app/admin.html`):
 
-# Step 2 — login wrangler with account B (replaces token with acct B)
-menutempmail → 3 (Login Wrangler)
-#   open link → authorize with account B
-
-# Step 3 — save account B as a CF profile
-menutempmail → 1 (Kelola akun Cloudflare)
-#   add profile → label "CF B" + account ID of B
-
-# Step 4 — register domain B under profile B
-menutempmail → 2 (Kelola domain)
-#   add domain B → attach to profile "CF B"
-
-# Step 5 — deploy worker to account B
-menutempmail → 5 (Deploy worker)
-#   select profile B → wrangler deploy worker in account B
-
-# Step 6 — enable Email Routing for domain B
-menutempmail → 6 (Aktifkan Email Routing)
-#   select domain B → enable catch-all → worker in account B
-
-# Step 7 — verify
-menutempmail → 10 (Refresh)
+```text
+1. Create an API token in the Cloudflare account that owns domain B.
+   Permissions: Zone:Read, Email Routing Rules:Edit, Workers Scripts:Edit
+   Zone resources: All zones in that account.
+2. Admin panel -> Cloudflare profiles -> add profile (id cf-b, Account ID B, the token), tick Activate.
+3. Admin panel -> Domains -> add domain B. The zone is looked up with profile B's token.
+4. Admin panel -> Cloudflare profiles -> Deploy Worker on profile cf-b.
+5. Admin panel -> Domains -> Enable routing for domain B.
 ```
+
+Menu equivalent: `menutempmail → 1` (add + select profile B) `→ 2` (add domain B) `→ 5` (deploy Worker for profile B) `→ 6` (enable routing for domain B).
+
+No `wrangler` login, no `DOMAINS=` editing, and no service restart: profile B's token drives the deploy and the routing call, and the panel updates the domain list.
 
 ### What you must NOT redo for domain B
 
 | Component | Reuse? | Why |
 |---|---|---|
 | Cloudflare Tunnel | ✅ **Reuse** | One tunnel serves all domains' email to the server |
-| `cloudflared tunnel login` | ❌ No | `cert.pem` already exists |
+| `cloudflared tunnel login` | ❌ No | `cert.pem` already exists, and re-login would replace account A's credential |
 | Tunnel created | ❌ No | Existing tunnel is enough |
-| Worker name | ✅ Same | `tempmailbyjhopanstore` (per account) |
+| Worker name | ✅ Same | `tempmailbyjhopanstore` (deployed per account) |
 | Web UI hostname | ⚠️ Optional | Only if you want a separate web URL for domain B |
 
 ### Email-only vs Web for domain B
@@ -376,18 +393,18 @@ Email → x@domain-b.com → Worker B → Tunnel A → Server → inbox
 Web   → tempmail.domain-a.com/app/   (unchanged)
 ```
 
-**Web on domain B:** requires a new tunnel in account B + DNS route. Uncommon — only if you want a separate admin URL per domain.
+**Web on domain B:** requires a new tunnel in account B + its own DNS route. Uncommon, only if you want a separate admin URL per domain.
 
 ### The KEY difference: Profile vs Login vs Worker
 
 | Concept | What | Notes |
 |---|---|---|
-| **Login (Wrangler)** | Active OAuth token | 1 token = 1 account. Last login is active. |
-| **Profile (CF A / CF B)** | Saved account data (label, account ID) | Multiple allowed, never expire |
-| **Active profile** | Which profile is used for deploy/routing | Switch anytime |
-| **Worker** | Per-account script `tempmailbyjhopanstore` | Deployed in host account |
+| **Profile (CF A / CF B)** | Saved account data: label, Account ID, encrypted API token | Multiple allowed, never expire |
+| **Active profile** | Which profile the panel uses by default | Switch anytime from the panel or menu |
+| **Worker** | Per-account script `tempmailbyjhopanstore` | Deployed through the Cloudflare API, no `wrangler` needed |
+| **Wrangler login** | Legacy OAuth token used only by the old `setup.sh` flow | Not needed for multi-account anymore |
 
-Because Wrangler stores only **one** OAuth token at a time, switching accounts requires `menutempmail → 3` again. For permanent multi-account without re-login, **API Token per profile** is the way (see roadmap).
+Each profile carries its own API token, so switching accounts is a profile switch, never a re-login.
 
 ---
 

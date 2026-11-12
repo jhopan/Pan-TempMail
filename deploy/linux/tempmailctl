@@ -6,17 +6,163 @@ APP=/opt/tempmail
 ENV_DIR=/etc/tempmail
 APP_ENV=$ENV_DIR/tempmail.env
 STATE=$ENV_DIR/cloudflare-state.json
-WORKER_DIR=$APP/worker
+HELPER_IN=$APP/data/helper/in
 TUNNEL_NAME=tempmailbyjhopanstore
 
 need_root() {
   [ "$(id -u)" = 0 ] || { echo "Run: menutempmail"; exit 1; }
 }
 
+# Menu mengurai JSON lewat python3; tanpa itu pesan errornya menyesatkan.
+require_python() {
+  command -v python3 >/dev/null 2>&1 || {
+    echo "python3 wajib ada untuk menu ini. Pasang: apt-get install -y python3" >&2
+    exit 1
+  }
+}
+
 app_port() {
   local p
   p=$(grep '^PORT=' "$APP_ENV" 2>/dev/null | cut -d= -f2)
   echo "${p:-8080}"
+}
+
+# ─── Klien admin API lokal ───────────────────────────────────────────────────
+# Database di app adalah sumber data tunggal untuk profil, domain, Worker,
+# routing, copy, dan tunnel. Menu ini hanya klien tipis; kerja root
+# (cloudflared, service) tetap di bash.
+TM_JWT=""
+TM_BODY=""
+TM_CODE=""
+
+api_base() {
+  if [ -n "${TM_API_BASE:-}" ]; then
+    printf '%s' "${TM_API_BASE%/}"
+  else
+    printf 'http://127.0.0.1:%s' "$(app_port)"
+  fi
+}
+
+# Login admin pakai ADMIN_EMAIL/ADMIN_PASS dari env file. JWT hanya hidup di
+# variabel shell, tidak pernah ditulis ke disk atau dicetak.
+api_login() {
+  [ -n "$TM_JWT" ] && return 0
+  local email pass body out token
+  email=$(grep '^ADMIN_EMAIL=' "$APP_ENV" 2>/dev/null | cut -d= -f2- || true)
+  pass=$(grep '^ADMIN_PASS=' "$APP_ENV" 2>/dev/null | cut -d= -f2- || true)
+  if [ -z "$email" ] || [ -z "$pass" ]; then
+    echo "ADMIN_EMAIL/ADMIN_PASS belum ada di $APP_ENV." >&2
+    echo "Set dulu lewat menu A (Kelola admin -> Reset password admin)." >&2
+    return 1
+  fi
+  body=$(TM_EMAIL="$email" TM_PASS="$pass" python3 -c '
+import json, os
+print(json.dumps({"email": os.environ["TM_EMAIL"], "password": os.environ["TM_PASS"]}))
+')
+  if ! out=$(printf '%s' "$body" | curl -sS -m 15 -w '\n%{http_code}' -X POST "$(api_base)/api/auth/login" \
+      -H 'Content-Type: application/json' --data-binary @- 2>/dev/null); then
+    echo "Tidak bisa menghubungi API di $(api_base). Cek: systemctl status tempmail" >&2
+    return 1
+  fi
+  token=$(printf '%s' "$out" | python3 -c '
+import json, sys
+raw = sys.stdin.read()
+body, _, code = raw.rpartition("\n")
+if code.strip() != "200":
+    sys.exit(1)
+try:
+    print(json.loads(body).get("token", ""))
+except Exception:
+    sys.exit(1)
+' 2>/dev/null || true)
+  if [ -z "$token" ]; then
+    echo "Login API gagal (HTTP ${out##*$'\n'}). Set ulang password admin lewat menu A bila kredensial salah." >&2
+    return 1
+  fi
+  TM_JWT=$token
+}
+
+# Panggil API, simpan badan jawaban di TM_BODY dan status di TM_CODE.
+api_raw() {
+  local method=$1 path=$2 data=${3:-} timeout=${4:-30} out
+  TM_BODY=""
+  TM_CODE=""
+  api_login || return 1
+  if [ -n "$data" ]; then
+    # Badan dikirim lewat stdin: token/password tidak muncul di daftar proses (ps).
+    out=$(printf '%s' "$data" | curl -sS -m "$timeout" -w '\n%{http_code}' -X "$method" "$(api_base)$path" \
+      -H "Authorization: Bearer $TM_JWT" -H 'Content-Type: application/json' \
+      --data-binary @- 2>/dev/null) || out=""
+  else
+    out=$(curl -sS -m "$timeout" -w '\n%{http_code}' -X "$method" "$(api_base)$path" \
+      -H "Authorization: Bearer $TM_JWT" 2>/dev/null) || out=""
+  fi
+  if [ -z "$out" ]; then
+    echo "Tidak bisa menghubungi API $(api_base)$path. Cek: systemctl status tempmail" >&2
+    return 1
+  fi
+  TM_CODE=${out##*$'\n'}
+  TM_BODY=${out%$'\n'*}
+  return 0
+}
+
+api_is_ok() {
+  case "${TM_CODE:-}" in
+    2*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# Cetak field error + detail apa adanya (mis. pesan Cloudflare di "detail").
+api_error() {
+  local msg
+  msg=$(printf '%s' "$TM_BODY" | python3 -c '
+import json, sys
+try:
+    d = json.load(sys.stdin)
+except Exception:
+    d = {}
+msg = d.get("error") or ""
+detail = d.get("detail") or ""
+if msg and detail:
+    print(str(msg) + ": " + str(detail))
+else:
+    print(str(msg or detail))
+' 2>/dev/null || true)
+  [ -n "$msg" ] || msg="Permintaan API gagal (HTTP ${TM_CODE:-000})"
+  echo "  GAGAL: $msg" >&2
+}
+
+# api_call METHOD PATH [JSON] [TIMEOUT]: diam saat 2xx, cetak error saat gagal.
+api_call() {
+  api_raw "$@" || return 1
+  api_is_ok && return 0
+  api_error
+  return 1
+}
+
+# api_json: cetak badan JSON untuk diurai python3.
+api_json() {
+  api_raw "$@" || return 1
+  if api_is_ok; then
+    printf '%s' "$TM_BODY"
+    return 0
+  fi
+  api_error
+  return 1
+}
+
+# tm_json field ENVVAR [field ENVVAR ...]: JSON satu baris tanpa meneruskan
+# nilai sensitif lewat argv (ps).
+tm_json() {
+  python3 -c '
+import json, os, sys
+args = sys.argv[1:]
+out = {}
+for i in range(0, len(args), 2):
+    out[args[i]] = os.environ.get(args[i + 1], "")
+print(json.dumps(out))
+' "$@"
 }
 
 ensure_state() {
@@ -39,16 +185,18 @@ PY
 }
 
 refresh_app_domains() {
+  # DOMAINS hanya fallback: app membaca domain dari database, jadi tidak perlu restart.
   local domains
-  domains=$(python3 - "$STATE" <<'PY'
+  if ! domains=$(api_json GET /api/admin/cloudflare/domains | python3 -c '
 import json, sys
-state=json.load(open(sys.argv[1]))
-print(','.join(sorted(name for name, item in state['domains'].items() if item.get('enabled'))))
-PY
-)
+items = json.load(sys.stdin)
+print(",".join(sorted(d["domain"] for d in items if d.get("enabled") and d.get("routing"))))
+'); then
+    return 0
+  fi
   [ -n "$domains" ] || domains=local.invalid
   set_app_env DOMAINS "$domains"
-  systemctl restart tempmail
+  echo "DOMAINS=$domains (fallback env; database tetap sumber utama)."
 }
 
 set_app_env() {
@@ -60,29 +208,21 @@ set_app_env() {
   rm -f "$tmp"
 }
 
-profile_token() {
-  local profile=$1
-  python3 - "$STATE" "$profile" <<'PY'
-import json, sys
-print(json.load(open(sys.argv[1]))['profiles'][sys.argv[2]]['token'])
-PY
-}
-
-profile_account_id() {
-  local profile=$1
-  python3 - "$STATE" "$profile" <<'PY'
-import json, sys
-print(json.load(open(sys.argv[1]))['profiles'][sys.argv[2]].get('account_id',''))
-PY
-}
-
 active_profile() {
-  state_get active_profile
+  local profiles
+  profiles=$(api_json GET /api/admin/cloudflare/profiles) || return 1
+  printf '%s' "$profiles" | python3 -c '
+import json, sys
+for p in json.load(sys.stdin):
+    if p.get("active"):
+        print(p.get("id", ""))
+        break
+'
 }
 
 choose_profile() {
   local profile
-  profile=$(active_profile)
+  profile=$(active_profile) || { echo "Status Cloudflare tidak bisa dibaca dari API." >&2; return 1; }
   if [ -z "$profile" ]; then
     echo "Belum ada akun Cloudflare. Tambahkan dari menu akun." >&2
     return 1
@@ -90,163 +230,133 @@ choose_profile() {
   printf '%s' "$profile"
 }
 
-cf_api() {
-  local profile=$1 method=$2 path=$3 body=${4:-}
-  local token response
-  token=$(profile_token "$profile")
-  if [ -n "$body" ]; then
-    response=$(curl -fsS -X "$method" "https://api.cloudflare.com/client/v4$path" \
-      -H "Authorization: Bearer $token" -H 'Content-Type: application/json' --data "$body")
-  else
-    response=$(curl -fsS -X "$method" "https://api.cloudflare.com/client/v4$path" \
-      -H "Authorization: Bearer $token")
-  fi
-  printf '%s' "$response" | python3 -c 'import json,sys; d=json.load(sys.stdin); (print(json.dumps(d.get("result"))) if d.get("success") else (_ for _ in ()).throw(SystemExit(json.dumps(d.get("errors",d))))'
-}
-
-zone_id() {
-  local profile=$1 domain=$2 result
-  result=$(cf_api "$profile" GET "/zones?name=$domain")
-  printf '%s' "$result" | python3 - "$domain" <<'PY'
-import json, sys
-items=json.load(sys.stdin)
-domain=sys.argv[1]
-if not items or items[0].get('status') != 'active':
-    raise SystemExit('Zone tidak ditemukan atau belum Active: ' + domain)
-print(items[0]['id'])
-PY
-}
-
-ensure_worker_tools() {
-  if ! command -v npm >/dev/null 2>&1; then
-    echo "Install Node.js/npm untuk Wrangler..."
-    apt-get update -qq
-    apt-get install -y -qq nodejs npm
-  fi
-}
-
 add_cf_profile() {
-  local name account token label
+  local name account token label payload
   read -r -p "ID profil (contoh: cf-a, cf-b): " name
-  [[ "$name" =~ ^[a-zA-Z0-9_-]+$ ]] || { echo "ID hanya huruf/angka/-/_"; return; }
+  [[ "$name" =~ ^[a-zA-Z0-9_-]+$ ]] || { echo "ID hanya huruf/angka/-/_"; return 0; }
   read -r -p "Label akun (contoh: Cloudflare A): " label
   read -r -p "Cloudflare Account ID: " account
-  read -r -s -p "Cloudflare API Token (disimpan root-only): " token; echo
-  [ -n "$name" ] && [ -n "$account" ] && [ -n "$token" ] || { echo "Data wajib diisi."; return; }
-
-  CF_NAME="$name" CF_LABEL="$label" CF_ACCOUNT="$account" CF_TOKEN="$token" python3 - "$STATE" <<'PY'
-import json, os, sys
-path=sys.argv[1]
-data=json.load(open(path))
-data['profiles'][os.environ['CF_NAME']]={
-  'label': os.environ['CF_LABEL'] or os.environ['CF_NAME'],
-  'account_id': os.environ['CF_ACCOUNT'],
-  'token': os.environ['CF_TOKEN'],
-  'worker_deployed': False,
-}
-if not data['active_profile']:
-  data['active_profile']=os.environ['CF_NAME']
-open(path,'w').write(json.dumps(data,indent=2)+'\n')
-PY
-  chmod 600 "$STATE"
-  echo "Profil $name tersimpan. Token tidak ditampilkan dashboard."
+  read -r -s -p "Cloudflare API Token (disimpan terenkripsi di database): " token; echo
+  [ -n "$name" ] && [ -n "$account" ] && [ -n "$token" ] || { echo "Data wajib diisi."; return 0; }
+  payload=$(CF_ID="$name" CF_LABEL="$label" CF_ACCOUNT="$account" CF_TOKEN="$token" \
+    tm_json id CF_ID label CF_LABEL account_id CF_ACCOUNT token CF_TOKEN)
+  api_call POST /api/admin/cloudflare/profiles "$payload" 60 || return 0
+  echo "Profil $name tersimpan di database. Token tidak ditampilkan dashboard."
 }
 
 select_cf_profile() {
-  local selected
-  python3 - "$STATE" <<'PY'
-import json,sys
-d=json.load(open(sys.argv[1]))
-for key,item in d['profiles'].items(): print(f'{key}\t{item.get("label",key)}')
-PY
+  local selected profiles
+  profiles=$(api_json GET /api/admin/cloudflare/profiles) || return 0
+  printf '%s' "$profiles" | python3 -c '
+import json, sys
+for p in json.load(sys.stdin):
+    pid = p.get("id") or ""
+    print(pid + "\t" + (p.get("label") or pid))
+'
   read -r -p "Pilih ID profil: " selected
-  python3 - "$STATE" "$selected" <<'PY'
-import json,sys
-path,key=sys.argv[1:]
-d=json.load(open(path))
-if key not in d['profiles']: raise SystemExit('Profil tidak ada.')
-d['active_profile']=key
-open(path,'w').write(json.dumps(d,indent=2)+'\n')
-PY
+  [ -n "$selected" ] || return 0
+  api_call POST "/api/admin/cloudflare/profiles/$selected/activate" || return 0
   echo "Profil aktif: $selected"
 }
 
 remove_cf_profile() {
-  local selected
+  local selected yes
   read -r -p "ID profil yang dihapus: " selected
+  [ -n "$selected" ] || return 0
   read -r -p "Hapus profil $selected? Domain tetap ada namun tidak bisa dikelola sampai dipindah. [y/N]: " yes
-  [ "$yes" = y ] || return
-  python3 - "$STATE" "$selected" <<'PY'
-import json,sys
-path,key=sys.argv[1:]
-d=json.load(open(path))
-if any(v.get('profile') == key for v in d['domains'].values()):
-  raise SystemExit('Masih ada domain memakai profil ini. Hapus/pindahkan domain dulu.')
-d['profiles'].pop(key, None)
-if d['active_profile'] == key: d['active_profile']=''
-open(path,'w').write(json.dumps(d,indent=2)+'\n')
+  [ "$yes" = y ] || return 0
+  api_call DELETE "/api/admin/cloudflare/profiles/$selected" || return 0
+  echo "Profil $selected dihapus dari database."
+}
+
+# Impor sekali jalan dari cloudflare-state.json lama. Idempoten: profil yang
+# sudah ada tidak ditimpa, jadi aman dijalankan ulang.
+import_state_file() {
+  local payload result
+  if [ ! -f "$STATE" ]; then
+    echo "File $STATE tidak ada. Tidak ada yang diimpor."
+    return 0
+  fi
+  payload=$(python3 - "$STATE" <<'PY'
+import json, sys
+print(json.dumps({"state": json.load(open(sys.argv[1]))}))
 PY
+) || { echo "File $STATE bukan JSON valid. Import dibatalkan."; return 0; }
+  result=$(api_json POST /api/admin/cloudflare/import "$payload" 60) || return 0
+  printf '%s' "$result" | python3 -c '
+import json, sys
+counts = json.load(sys.stdin).get("imported") or {}
+print("Import selesai: {} profil, {} domain, tunnel={}, profil aktif={}".format(
+    counts.get("profiles", 0), counts.get("domains", 0),
+    "ya" if counts.get("tunnel") else "tidak", counts.get("active_profile") or "-"))
+'
 }
 
 cf_profiles_menu() {
+  local profiles
   while true; do
     echo
     echo "=== Akun Cloudflare ==="
-    python3 - "$STATE" <<'PY'
-import json,sys
-d=json.load(open(sys.argv[1])); active=d.get('active_profile','')
-if not d['profiles']: print('Belum ada profil.')
-for key,item in d['profiles'].items():
-  marker='*' if key==active else ' '
-  print(f'{marker} {key}: {item.get("label",key)} | Account ID: {item.get("account_id","")}')
-PY
+    if profiles=$(api_json GET /api/admin/cloudflare/profiles); then
+      printf '%s' "$profiles" | python3 -c '
+import json, sys
+items = json.load(sys.stdin)
+if not items:
+    print("Belum ada profil.")
+for p in items:
+    pid = p.get("id") or ""
+    marker = "*" if p.get("active") else " "
+    worker = " | worker deployed" if p.get("worker_deployed") else ""
+    print(marker + " " + pid + ": " + (p.get("label") or pid) + " | Account ID: " + (p.get("account_id") or "") + worker)
+'
+    fi
     echo "1. Tambah/login akun Cloudflare"
     echo "2. Pilih akun aktif"
     echo "3. Hapus akun Cloudflare"
+    echo "4. Import cloudflare-state.json ke database"
     echo "0. Kembali"
     read -r -p "Choose: " choice
     case "$choice" in
-      1) add_cf_profile ;; 2) select_cf_profile ;; 3) remove_cf_profile ;; 0) return ;;
+      1) add_cf_profile ;; 2) select_cf_profile ;; 3) remove_cf_profile ;;
+      4) import_state_file ;; 0) return ;;
       *) echo "Pilihan salah." ;;
     esac
   done
 }
 
 add_domain() {
-  local profile domain zid
-  profile=$(choose_profile) || return
+  local profile domain payload
+  profile=$(choose_profile) || return 0
   read -r -p "Domain TempMail untuk profil $profile: " domain
-  [ -n "$domain" ] || return
-  zid=$(zone_id "$profile" "$domain") || return
-  CF_DOMAIN="$domain" CF_PROFILE="$profile" CF_ZONE="$zid" python3 - "$STATE" <<'PY'
-import json,os,sys
-path=sys.argv[1]; d=json.load(open(path))
-d['domains'][os.environ['CF_DOMAIN']]={'profile':os.environ['CF_PROFILE'],'zone_id':os.environ['CF_ZONE'],'enabled':False,'routing':False}
-open(path,'w').write(json.dumps(d,indent=2)+'\n')
-PY
+  [ -n "$domain" ] || return 0
+  payload=$(CF_DOMAIN="$domain" CF_PROFILE="$profile" tm_json domain CF_DOMAIN profile CF_PROFILE)
+  api_call POST /api/admin/cloudflare/domains "$payload" 60 || return 0
   echo "Domain ditambahkan. Pilih aktifkan routing setelah Worker profile ini di-deploy."
 }
 
 list_domains() {
-  python3 - "$STATE" <<'PY'
-import json,sys
-d=json.load(open(sys.argv[1]))
-if not d['domains']: print('Belum ada domain.')
-for name,item in sorted(d['domains'].items()):
-  print(f"{name} | profile={item.get('profile')} | TempMail={'ON' if item.get('enabled') else 'OFF'} | Routing={'ON' if item.get('routing') else 'OFF'}")
-PY
+  local domains
+  domains=$(api_json GET /api/admin/cloudflare/domains) || return 0
+  printf '%s' "$domains" | python3 -c '
+import json, sys
+items = sorted(json.load(sys.stdin), key=lambda d: d.get("domain") or "")
+if not items:
+    print("Belum ada domain.")
+for d in items:
+    print("{} | profile={} | TempMail={} | Routing={}".format(
+        d.get("domain"), d.get("profile"),
+        "ON" if d.get("enabled") else "OFF",
+        "ON" if d.get("routing") else "OFF"))
+'
 }
 
 remove_domain() {
-  local domain
+  local domain yes
   read -r -p "Domain yang dihapus dari TempMail: " domain
+  [ -n "$domain" ] || return 0
   read -r -p "Hapus $domain dari TempMail lokal? DNS/Cloudflare tidak dihapus. [y/N]: " yes
-  [ "$yes" = y ] || return
-  CF_DOMAIN="$domain" python3 - "$STATE" <<'PY'
-import json,os,sys
-path=sys.argv[1]; d=json.load(open(path)); d['domains'].pop(os.environ['CF_DOMAIN'],None)
-open(path,'w').write(json.dumps(d,indent=2)+'\n')
-PY
+  [ "$yes" = y ] || return 0
+  api_call DELETE "/api/admin/cloudflare/domains/$domain" || return 0
   refresh_app_domains
 }
 
@@ -268,109 +378,37 @@ domains_menu() {
 }
 
 set_copy_destinations() {
-  local current input
-  current=$(state_get_copy)
+  local current input payload
+  current=$(state_get_copy 2>/dev/null) || current=""
   echo "Tujuan salinan sekarang: ${current:-OFF}"
   read -r -p "Email tujuan, pisahkan koma. Kosongkan untuk OFF: " input
-  CF_COPIES="$input" python3 - "$STATE" <<'PY'
-import json,os,sys
-path=sys.argv[1]; d=json.load(open(path)); d['copy_destinations']=os.environ['CF_COPIES']
-open(path,'w').write(json.dumps(d,indent=2)+'\n')
-PY
+  payload=$(TM_COPIES="$input" python3 -c '
+import json, os
+raw = os.environ.get("TM_COPIES", "")
+print(json.dumps({"destinations": [part.strip() for part in raw.split(",") if part.strip()]}))
+')
+  api_call PUT /api/admin/cloudflare/copies "$payload" || return 0
   echo "Tersimpan. Deploy Worker profile terkait untuk menerapkan."
 }
 
 state_get_copy() {
-  python3 - "$STATE" <<'PY'
-import json,sys
-print(json.load(open(sys.argv[1])).get('copy_destinations',''))
-PY
-}
-
-# Login headless dengan fallback paste-link (sama seperti setup.sh):
-# proses login jalan di background, user buka link di browser PC, klik Allow,
-# browser gagal load (ERR_CONNECTION_REFUSED) -> copy URL address bar -> paste di sini.
-run_login() {
-  # Headless OAuth via --device flag (RFC 8628): user cukup buka URL + masukkan kode.
-  # Tidak pakai localhost callback sama sekali - cocok untuk SSH/headless.
-  local label=$1; shift
-  local logf url code pid
-
-  logf=$(mktemp)
-  "$@" >"$logf" 2>&1 &
-  pid=$!
-
-  # Tunggu URL + kode device flow muncul (max 15s)
-  url=""; code=""
-  for _ in $(seq 1 15); do
-    url=$(grep -oE 'https://dash\.cloudflare\.com/oauth2/device/verify[^ "]*' "$logf" | head -1 || true)
-    code=$(grep -oE 'and enter the code:' "$logf" | head -1 || true)
-    [ -n "$url" ] && break
-    sleep 1
-  done
-
-  # Fallback: URL biasa (bukan device flow)
-  if [ -z "$url" ]; then
-    url=$(grep -oE 'https://dash\.cloudflare\.com/[^ "]+' "$logf" | head -1 || true)
-  fi
-
-  if [ -z "$url" ]; then
-    echo "URL login tidak muncul. Output:"
-    cat "$logf"
-    wait "$pid" 2>/dev/null || true
-    rm -f "$logf"
-    return 1
-  fi
-
-  echo
-  echo "===== LOGIN $label ====="
-  echo "Buka URL ini di browser (HP/laptop manapun):"
-  echo
-  echo "  $url"
-  echo
-  # Tampilkan kode dari output wrangler
-  device_code=$(grep -A2 'enter the code' "$logf" | grep -oE '[A-Za-z0-9]{8}' | head -1 || true)
-  if [ -n "$device_code" ]; then
-    echo "Masukkan kode ini di halaman browser:"
-    echo
-    echo "  $device_code"
-    echo
-  fi
-  echo "Klik Continue / Authorize di browser."
-  echo "Setelah selesai, TEKAN ENTER di sini."
-  echo
-  read -r -p "Sudah authorize? Tekan ENTER untuk lanjut..." _
-
-  wait "$pid" 2>/dev/null || true
-  rm -f "$logf"
-  return 0
-}
-
-wrangler_logged_in() {
-  # Cek cepat: file token lokal ada? (instan, tanpa API call)
-  if [ -f /root/.wrangler/config/default.toml ] || [ -f /root/.config/.wrangler/config/default.toml ]; then
-    return 0
-  fi
-  # Fallback: tanya API (max 20s). whoami always exits 0; must grep output.
-  timeout 20 bash -c "cd '$WORKER_DIR' && CI=true npx wrangler whoami </dev/null 2>&1" | grep -q "You are logged in"
-}
-
-logout_wrangler() {
-  read -r -p "Hapus credential Wrangler? (y/N): " c
-  [ "$c" = y ] || { echo "Batal."; return; }
-  rm -rf /root/.wrangler /root/.config/.wrangler /root/.config/wrangler \
-         /root/.npm/_npx /tmp/wrangler-* 2>/dev/null || true
-  echo "Wrangler credential dihapus."
+  local copies
+  copies=$(api_json GET /api/admin/cloudflare/copies) || return 1
+  printf '%s' "$copies" | python3 -c '
+import json, sys
+print(", ".join(json.load(sys.stdin).get("destinations") or []))
+'
 }
 
 logout_tunnel() {
-  read -r -p "Hapus credential CF Tunnel (cert.pem + semua credential tunnel)? (y/N): " c
+  read -r -p "Hapus service + credential CF Tunnel di server ini? (y/N): " c
   [ "$c" = y ] || { echo "Batal."; return; }
   systemctl stop cloudflared 2>/dev/null || true
   systemctl disable cloudflared 2>/dev/null || true
   cloudflared service uninstall 2>/dev/null || true
   rm -rf /root/.cloudflared /etc/cloudflared
-  echo "CF Tunnel credential + service dihapus."
+  echo "Service + credential CF Tunnel lokal dihapus."
+  echo "cloudflared harus dipasang ulang dari panel admin (/admin -> Server) atau lewat menu 4 di menu ini."
 }
 
 reset_all() {
@@ -378,165 +416,152 @@ reset_all() {
   echo "Service TempMail tetap jalan, data email tidak terhapus."
   read -r -p "Ketik RESET untuk konfirmasi: " c
   [ "$c" = "RESET" ] || { echo "Batal."; return; }
-  logout_wrangler
   logout_tunnel
   rm -f "$STATE"
   echo '{}' > "$STATE"
-  echo "Reset selesai. Jalankan menu 8 untuk setup ulang."
+  echo "Reset selesai. Profil/domain Cloudflare di panel dan database TIDAK dihapus (kelola dari menu 1/2 atau panel admin)."
+  echo "Jalankan menu 8 untuk setup ulang."
 }
 
 
-login_wrangler() {
-  ensure_worker_tools
-  if wrangler_logged_in; then
-    echo "Wrangler sudah login."
-    return
+# Setup tunnel lewat API token profil aktif. Tidak ada login browser: API membuat
+# tunnel, token konektor disisipkan ke daftar perintah, lalu perintah itu dijalankan
+# satu per satu sebagai root di sini.
+tunnel_setup_api() {
+  local default_name tunnel_name web_host input payload created id token tun
+  local cmds_file cmd shown tunnel_state
+  default_name=$(grep '^CF_TUNNEL_NAME=' "$APP_ENV" 2>/dev/null | cut -d= -f2- || true)
+  [ -n "$default_name" ] || default_name=$TUNNEL_NAME
+  # Web host diambil dari state file, lalu dari database lewat API tunnel.
+  web_host=$(state_get tunnel web_host 2>/dev/null || true)
+  if [ -z "$web_host" ]; then
+    tun=$(api_json GET /api/admin/cloudflare/tunnel "" 15 2>/dev/null) || tun=""
+    if [ -n "$tun" ]; then
+      web_host=$(printf '%s' "$tun" | python3 -c '
+import json, sys
+print(json.load(sys.stdin).get("web_host") or "")
+' 2>/dev/null || true)
+    fi
   fi
-  run_login "Wrangler" bash -c "cd '$WORKER_DIR' && CI=true npx wrangler login --browser=false --device </dev/null"
-  if wrangler_logged_in; then
-    echo "Wrangler login OK."
-  else
-    echo "Wrangler belum login. Coba lagi (menu 3)."
+  echo "Tunnel Cloudflare dikelola lewat API token profil aktif (tanpa login browser)."
+  read -r -p "Hostname web tunnel${web_host:+ [$web_host]}: " input || input=""
+  if [ -n "$input" ]; then
+    web_host=$input
   fi
-}
-
-tunnel_login() {
-  echo "Tunnel hanya satu gateway. Login ke akun yang memiliki tunnel utama."
-  if [ -f /root/.cloudflared/cert.pem ]; then
-    echo "Sudah login (cert.pem ada). Skip."
-  else
-    run_login "CF Tunnel" cloudflared tunnel login
-    [ -f /root/.cloudflared/cert.pem ] && echo "CF Tunnel login OK." || echo "cert.pem belum ada. Coba lagi."
+  if [ -z "$web_host" ]; then
+    echo "Hostname web tunnel wajib diisi."
+    return 0
   fi
-  read -r -p "Label akun tunnel (contoh: CF A): " account
-  CF_TUNNEL_ACCOUNT="${account:-logged in}" python3 - "$STATE" <<'PY'
-import json,os,sys
-path=sys.argv[1]; d=json.load(open(path)); d['tunnel']['account']=os.environ['CF_TUNNEL_ACCOUNT']
-open(path,'w').write(json.dumps(d,indent=2)+'\n')
-PY
-}
-
-create_tunnel() {
-  local web_host list id tunnel_name
-  read -r -p "Hostname web tunnel (contoh: mail.domain.com): " web_host
-  [ -n "$web_host" ] || return
-  tunnel_name="$TUNNEL_NAME"
-  [ -f /root/.cloudflared/cert.pem ] || { echo "Login Tunnel dulu."; return; }
-  list=$(cloudflared tunnel list --output json)
-  id=$(python3 - "$tunnel_name" "$list" <<'PY'
-import json,sys
-try:
-  data=json.loads(sys.argv[2])
-  if not data: sys.exit(0)
-  for item in data:
-    if item['name']==sys.argv[1]: print(item['id']); break
-except: pass
-PY
-)
+  read -r -p "Nama tunnel [$default_name]: " input || input=""
+  tunnel_name=${input:-$default_name}
+  payload=$(CF_NAME="$tunnel_name" CF_HOST="$web_host" tm_json name CF_NAME web_host CF_HOST)
+  created=$(api_json POST /api/admin/cloudflare/tunnel/create "$payload" 60) || return 0
+  cmds_file=$(mktemp)
+  chmod 600 "$cmds_file"
+  id=$(printf '%s' "$created" | python3 -c '
+import json, sys
+print(json.load(sys.stdin).get("id") or "")
+' 2>/dev/null || true)
+  token=$(printf '%s' "$created" | python3 -c '
+import json, sys
+print(json.load(sys.stdin).get("token") or "")
+' 2>/dev/null || true)
+  printf '%s' "$created" | python3 -c '
+import json, sys
+cmds = json.load(sys.stdin).get("commands") or []
+sys.stdout.write("\n".join(cmds))
+' >"$cmds_file" 2>/dev/null || true
   if [ -z "$id" ]; then
-    cloudflared tunnel create "$tunnel_name"
-    list=$(cloudflared tunnel list --output json 2>/dev/null || echo "[]")
-    id=$(python3 - "$tunnel_name" "$list" <<'PY'
-import json,sys
-try:
-  data=json.loads(sys.argv[2])
-  if not data: sys.exit(0)
-  for item in data:
-    if item['name']==sys.argv[1]: print(item['id']); break
-except: pass
-PY
-)
+    rm -f "$cmds_file"
+    echo "API tidak mengembalikan ID tunnel. Cek panel admin (/admin -> Tunnel)."
+    return 0
   fi
-  [ -n "$id" ] || { echo "Tunnel gagal dibuat."; return; }
-  cat >/etc/cloudflared/config.yml <<EOF
-tunnel: $id
-credentials-file: /root/.cloudflared/$id.json
-ingress:
-  - hostname: $web_host
-    service: http://127.0.0.1:$(app_port)
-    originRequest:
-      disableChunkedEncoding: true
-  - service: http_status:404
-EOF
-  sed -i 's/^ //' /etc/cloudflared/config.yml
-  cloudflared tunnel route dns --overwrite-dns "$tunnel_name" "$web_host" 2>/dev/null || \
-    cloudflared tunnel route dns "$tunnel_name" "$web_host" 2>/dev/null || true
-  cloudflared service install 2>/dev/null || true
-  systemctl enable --now cloudflared
+  # Token konektor tidak pernah dicetak: perintah dari API sudah memuatnya, jadi
+  # yang ditampilkan hanya versi tersamarkan.
+  if [ -s "$cmds_file" ]; then
+    while IFS= read -r cmd || [ -n "$cmd" ]; do
+      [ -n "$cmd" ] || continue
+      shown=$cmd
+      if [ -n "$token" ]; then
+        shown=${cmd//"$token"/"***"}
+      fi
+      printf '  $ %s\n' "$shown"
+      if ! run_root_command "$cmd"; then
+        echo "  GAGAL: perintah di atas gagal, proses dihentikan."
+        echo "  Install cloudflared bisa diulang dari panel admin (/admin -> Server) atau menu 4."
+        rm -f "$cmds_file"
+        return 0
+      fi
+    done <"$cmds_file"
+  fi
+  rm -f "$cmds_file"
+  payload=$(CF_ID="$id" CF_NAME="$tunnel_name" CF_HOST="$web_host" \
+    tm_json id CF_ID name CF_NAME web_host CF_HOST)
+  api_call PUT /api/admin/cloudflare/tunnel "$payload" || return 0
+  # State file tetap menyimpan key tunnel untuk jalur impor dan fallback dashboard.
   CF_TUNNEL_ID="$id" CF_TUNNEL_NAME="$tunnel_name" CF_WEB_HOST="$web_host" python3 - "$STATE" <<'PY'
-import json,os,sys
-path=sys.argv[1]; d=json.load(open(path)); d['tunnel'].update({'id':os.environ['CF_TUNNEL_ID'],'name':os.environ['CF_TUNNEL_NAME'],'web_host':os.environ['CF_WEB_HOST']})
-open(path,'w').write(json.dumps(d,indent=2)+'\n')
+import json, os, sys
+path = sys.argv[1]
+with open(path) as fh:
+    data = json.load(fh)
+data.setdefault("tunnel", {}).update({
+    "id": os.environ["CF_TUNNEL_ID"],
+    "name": os.environ["CF_TUNNEL_NAME"],
+    "web_host": os.environ["CF_WEB_HOST"],
+})
+with open(path, "w") as fh:
+    json.dump(data, fh, indent=2)
+    fh.write("\n")
 PY
-  echo "Tunnel siap: https://$web_host/app/"
+  tunnel_state=$(systemctl is-active cloudflared 2>/dev/null || true)
+  if [ "$tunnel_state" = "active" ]; then
+    echo "Tunnel siap: https://$web_host/app/ (cloudflared active)"
+  else
+    echo "Tunnel tersimpan di database, tetapi service cloudflared: ${tunnel_state:-tidak terpasang}."
+    echo "Ulangi menu 4, atau pasang dari panel admin (/admin -> Server)."
+  fi
+}
+
+# Jalankan perintah dari API apa adanya; prefix "sudo " dibuang bila host tidak
+# punya sudo (menu ini sudah jalan sebagai root).
+run_root_command() {
+  local cmd=$1
+  if ! command -v sudo >/dev/null 2>&1; then
+    cmd=${cmd#sudo }
+  fi
+  bash -c "$cmd"
 }
 
 deploy_worker() {
-  local profile token account api_key copies
-  profile=$(choose_profile) || return
-  ensure_worker_tools
-  token=$(profile_token "$profile")
-  account=$(profile_account_id "$profile")
-  api_key=$(grep '^EMAIL_API_KEY=' "$APP_ENV" | cut -d= -f2-)
-  [ -n "$api_key" ] || { api_key=$(openssl rand -hex 32); set_app_env EMAIL_API_KEY "$api_key"; }
-  copies=$(state_get_copy)
-  local web_host
-  web_host=$(state_get tunnel web_host)
-  [ -n "$web_host" ] || { echo "Setup tunnel web dulu."; return; }
-  (cd "$WORKER_DIR" && \
-    export CLOUDFLARE_API_TOKEN="$token" CLOUDFLARE_ACCOUNT_ID="$account"; \
-    CI=true npx wrangler deploy && \
-    printf '%s\n' "https://$web_host" | CI=true npx wrangler secret put TEMPMAIL_SERVER_URL && \
-    printf '%s\n' "$api_key" | CI=true npx wrangler secret put TEMPMAIL_API_KEY && \
-    printf '%s\n' "$copies" | CI=true npx wrangler secret put FORWARD_LIST)
-  CF_PROFILE="$profile" python3 - "$STATE" <<'PY'
-import json,os,sys
-path=sys.argv[1]; d=json.load(open(path)); d['profiles'][os.environ['CF_PROFILE']]['worker_deployed']=True
-open(path,'w').write(json.dumps(d,indent=2)+'\n')
-PY
-  echo "Worker profile $profile deployed. Salinan: ${copies:-OFF}"
+  local profile
+  profile=$(choose_profile) || return 0
+  api_call POST "/api/admin/cloudflare/profiles/$profile/deploy-worker" '{}' 180 || return 0
+  echo "Worker profile $profile deployed ke Cloudflare (secret diisi otomatis oleh app)."
 }
 
 delete_worker() {
-  local profile token account
-  profile=$(choose_profile) || return
-  ensure_worker_tools
-  token=$(profile_token "$profile")
-  account=$(profile_account_id "$profile")
-  read -r -p "Hapus worker tempmailbyjhopanstore dari Cloudflare? (y/N): " c
-  [ "$c" = y ] || { echo "Batal."; return; }
-  (cd "$WORKER_DIR" && \
-    export CLOUDFLARE_API_TOKEN="$token" CLOUDFLARE_ACCOUNT_ID="$account"; \
-    CI=true npx wrangler delete </dev/null)
+  local profile yes
+  profile=$(choose_profile) || return 0
+  read -r -p "Hapus worker tempmailbyjhopanstore dari Cloudflare? (y/N): " yes
+  [ "$yes" = y ] || { echo "Batal."; return 0; }
+  api_call DELETE "/api/admin/cloudflare/profiles/$profile/worker" 60 || return 0
   echo "Worker dihapus dari Cloudflare."
 }
 
 enable_routing_for_domain() {
-  local domain item profile zid body
+  local domain
   read -r -p "Domain yang diaktifkan catch-all: " domain
-  item=$(python3 - "$STATE" "$domain" <<'PY'
-import json,sys
-print(json.dumps(json.load(open(sys.argv[1]))['domains'].get(sys.argv[2],{})))
-PY
-)
-  [ "$item" != '{}' ] || { echo "Domain tidak ada di menu domain."; return; }
-  profile=$(printf '%s' "$item" | python3 -c 'import json,sys; print(json.load(sys.stdin)["profile"])')
-  body='{"name":"TempMail catch-all","enabled":true,"actions":[{"type":"worker","value":["tempmailbyjhopanstore"]}],"matchers":[{"type":"all"}]}'
-  zid=$(printf '%s' "$item" | python3 -c 'import json,sys; print(json.load(sys.stdin)["zone_id"])')
-  cf_api "$profile" POST "/zones/$zid/email/routing/enable" '{}' >/dev/null || true
-  cf_api "$profile" PUT "/zones/$zid/email/routing/rules/catch_all" "$body" >/dev/null
-  CF_DOMAIN="$domain" python3 - "$STATE" <<'PY'
-import json,os,sys
-path=sys.argv[1]; d=json.load(open(path)); d['domains'][os.environ['CF_DOMAIN']]['enabled']=True; d['domains'][os.environ['CF_DOMAIN']]['routing']=True
-open(path,'w').write(json.dumps(d,indent=2)+'\n')
-PY
+  [ -n "$domain" ] || return 0
+  # Error Cloudflare (mis. token kurang izin) diteruskan apa adanya oleh API di "detail".
+  api_call POST "/api/admin/cloudflare/domains/$domain/routing" \
+    '{"routing":true,"unlock_dns":true}' 60 || return 0
   refresh_app_domains
-  echo "Routing aktif: *@$domain → Worker profile $profile → TempMail"
+  echo "Routing aktif: *@$domain → Worker → TempMail"
 }
 
 dashboard() {
-  local service rss inboxes messages backup tunnel copy
-  local host port api_key admin_email web_url
+  local service rss inboxes messages backup tunnel
+  local host port api_key admin_email
   local C_GREEN='\033[0;32m' C_RED='\033[0;31m' C_CYAN='\033[0;36m' C_YELLOW='\033[0;33m' C_BOLD='\033[1m' C_DIM='\033[2m' C_NC='\033[0m'
   service=$(systemctl is-active tempmail 2>/dev/null || true)
   rss=$(ps -o rss= -C tempmail 2>/dev/null | awk 'NR==1 {printf "%.1f MiB",$1/1024}')
@@ -544,37 +569,74 @@ dashboard() {
   messages=$(sqlite3 "$APP/data/tempmail.db" 'SELECT count(*) FROM messages;' 2>/dev/null || echo 0)
   backup=$(systemctl is-active tempmail-backup.timer 2>/dev/null || true)
   tunnel=$(systemctl is-active cloudflared 2>/dev/null || true)
-  copy=$(state_get_copy); [ -n "$copy" ] || copy=OFF
   port=$(app_port)
   host=$(hostname -I | awk '{print $1}')
   api_key=$(grep '^EMAIL_API_KEY=' "$APP_ENV" 2>/dev/null | cut -d= -f2)
   admin_email=$(sqlite3 "$APP/data/tempmail.db" 'SELECT email FROM users WHERE role="admin" LIMIT 1;' 2>/dev/null || echo "belum")
-  web_url=$(python3 -c "import json;d=json.load(open('$STATE'));print(d.get('tunnel',{}).get('web_host',''))" 2>/dev/null || echo "")
-  local dom_val=$(python3 -c "import json;d=json.load(open('$STATE'));doms=list(d.get('domains',{}).keys());print(', '.join(doms) if doms else 'belum ada')" 2>/dev/null || echo "belum ada")
-  local wrkr=$(python3 -c "import json;d=json.load(open('$STATE'));ap=d.get('active_profile','');p=d.get('profiles',{}).get(ap,{});print('✓ deployed' if p.get('worker_deployed') else '✗ belum')" 2>/dev/null || echo "✗ belum")
-  local tun_name=$(python3 -c "import json;d=json.load(open('$STATE'));print(d.get('tunnel',{}).get('name','') or '')" 2>/dev/null || echo "")
-  local tun_id=$(python3 -c "import json;d=json.load(open('$STATE'));print(d.get('tunnel',{}).get('id','') or '')" 2>/dev/null || echo "")
-  local dom_count=$(python3 -c "import json;d=json.load(open('$STATE'));print(len(d.get('domains',{})))" 2>/dev/null || echo "0")
-  local prof_count=$(python3 -c "import json;d=json.load(open('$STATE'));print(len(d.get('profiles',{})))" 2>/dev/null || echo "0")
-  local active_prof=$(python3 -c "import json;d=json.load(open('$STATE'));print(d.get('active_profile','') or '')" 2>/dev/null || echo "")
-  # Wrangler login status (check token file, not API call — faster + reliable)
-  local wrangler_status="belum login"
-  if [ -f /root/.wrangler/config/default.toml ]; then
-    if grep -q "oauth_token" /root/.wrangler/config/default.toml 2>/dev/null; then
-      wrangler_status="✓ login"
+
+  # Status Cloudflare dari database lewat API. Kalau service mati, hanya field
+  # tunnel yang dibaca dari state file lama dan ditandai jelas.
+  local cf_source="api" cf_marker="" status_json parsed
+  local dom_val="belum ada" tun_name="" tun_id="" web_url="" tun_status="" tun_conn=0
+  local routing_on="OFF" copy="OFF"
+  local prof_json prof_parsed prof_ok=0 prof_total=0 prof_token=0 active_prof="" prof_worker="✗ belum"
+  if status_json=$(api_json GET /api/admin/cloudflare/status "" 15 2>/dev/null) && [ -n "$status_json" ]; then
+    parsed=$(printf '%s' "$status_json" | python3 -c '
+import json, sys
+d = json.load(sys.stdin)
+domains = d.get("domains") or []
+tunnel = d.get("tunnel") or {}
+print("\t".join([
+    ", ".join(x.get("domain") or "" for x in domains) or "belum ada",
+    "ON" if any(x.get("routing") for x in domains) else "OFF",
+    ", ".join(d.get("copies") or []) or "OFF",
+    tunnel.get("web_host") or "",
+    tunnel.get("name") or "",
+    tunnel.get("id") or "",
+    tunnel.get("status") or "",
+    str(tunnel.get("connections") or 0),
+]))
+' 2>/dev/null) || parsed=""
+    if [ -n "$parsed" ]; then
+      IFS=$'\t' read -r dom_val routing_on copy web_url tun_name tun_id tun_status tun_conn <<<"$parsed"
+      [ -n "$copy" ] || copy=OFF
+      [ -n "$tun_status" ] || tun_status="unknown"
+    else
+      cf_source="state file"
     fi
-  elif [ -f /root/.config/.wrangler/config/default.toml ]; then
-    if grep -q "oauth_token" /root/.config/.wrangler/config/default.toml 2>/dev/null; then
-      wrangler_status="✓ login"
+  else
+    cf_source="state file"
+  fi
+  # Profil + token dari endpoint profil, sumber data yang sama dengan panel admin.
+  if prof_json=$(api_json GET /api/admin/cloudflare/profiles "" 15 2>/dev/null) && [ -n "$prof_json" ]; then
+    prof_parsed=$(printf '%s' "$prof_json" | python3 -c '
+import json, sys
+items = json.load(sys.stdin)
+active = next((p for p in items if p.get("active")), None)
+print("\t".join([
+    str(len(items)),
+    str(sum(1 for p in items if p.get("has_token"))),
+    (active.get("id") or "") if active else "",
+    ("✓ deployed" if active.get("worker_deployed") else "✗ belum") if active else "✗ belum",
+]))
+' 2>/dev/null) || prof_parsed=""
+    if [ -n "$prof_parsed" ]; then
+      prof_ok=1
+      IFS=$'\t' read -r prof_total prof_token active_prof prof_worker <<<"$prof_parsed"
     fi
   fi
-  # CF Tunnel login status
-  local cf_cert_status="belum login"
-  [ -f /root/.cloudflared/cert.pem ] && cf_cert_status="✓ login (cert.pem)"
-  # Email routing status
-  local routing_status="OFF"
-  python3 -c "import json;d=json.load(open('$STATE'));doms=d.get('domains',{});routing_status='ON' if any(v.get('routing') for v in doms.values()) else 'OFF'" 2>/dev/null || true
-  local routing_on=$(python3 -c "import json;d=json.load(open('$STATE'));doms=d.get('domains',{});print('ON' if any(v.get('routing') for v in doms.values()) else 'OFF')" 2>/dev/null || echo "OFF")
+  if [ "$cf_source" != "api" ]; then
+    cf_marker=" (state file)"
+    # Hanya field tunnel yang diambil dari state file; angka lain ditandai tidak terbaca.
+    web_url=$(state_get tunnel web_host 2>/dev/null || true)
+    tun_name=$(state_get tunnel name 2>/dev/null || true)
+    tun_id=$(state_get tunnel id 2>/dev/null || true)
+    tun_status=""
+    tun_conn=0
+    dom_val="tidak terbaca (API mati)"
+    routing_on="-"
+    copy="-"
+  fi
 
   # ── Dashboard ──
   echo
@@ -612,11 +674,13 @@ dashboard() {
   fi
   printf "  ${C_DIM}%-16s${C_NC} ${C_GREEN}%s${C_NC}\n" "API Key" "$api_key"
   echo
-  echo -e "  ${C_BOLD}─── Cloudflare (Tunnel) ───${C_NC}"
-  if [ "${cf_cert_status#✓}" != "$cf_cert_status" ]; then
-    printf "  ${C_DIM}%-16s${C_NC} ${C_GREEN}%s${C_NC}\n" "Login" "$cf_cert_status"
+  echo -e "  ${C_BOLD}─── Cloudflare (Tunnel) ───${C_NC}${C_YELLOW}${cf_marker}${C_NC}"
+  if [ "$tun_status" = "healthy" ] || [ "$tun_status" = "degraded" ]; then
+    printf "  ${C_DIM}%-16s${C_NC} ${C_GREEN}%s${C_NC}\n" "Konektor" "$tun_status ($tun_conn koneksi)"
+  elif [ -n "$tun_status" ]; then
+    printf "  ${C_DIM}%-16s${C_NC} ${C_RED}%s${C_NC}\n" "Konektor" "$tun_status"
   else
-    printf "  ${C_DIM}%-16s${C_NC} ${C_RED}%s${C_NC}\n" "Login" "$cf_cert_status"
+    printf "  ${C_DIM}%-16s${C_NC} ${C_DIM}%s${C_NC}\n" "Konektor" "belum bisa dibaca"
   fi
   printf "  ${C_DIM}%-16s${C_NC} %s\n" "Tunnel Name" "${tun_name:-belum dibuat}"
   printf "  ${C_DIM}%-16s${C_NC} %s\n" "Tunnel ID" "${tun_id:-belum dibuat}"
@@ -632,23 +696,26 @@ dashboard() {
   fi
   printf "  ${C_DIM}%-16s${C_NC} %s\n" "Salinan Email" "$copy"
   echo
-  echo -e "  ${C_BOLD}─── Wrangler (Worker) ───${C_NC}"
-  if [ "${wrangler_status#✓}" != "$wrangler_status" ]; then
-    printf "  ${C_DIM}%-16s${C_NC} ${C_GREEN}%s${C_NC}\n" "Login" "$wrangler_status"
+  echo -e "  ${C_BOLD}─── Cloudflare API token ───${C_NC}"
+  if [ "$prof_ok" = 1 ]; then
+    printf "  ${C_DIM}%-16s${C_NC} %s\n" "Profil" "$prof_total profil"
+    if [ "$prof_token" -gt 0 ]; then
+      printf "  ${C_DIM}%-16s${C_NC} ${C_GREEN}%s${C_NC}\n" "Punya Token" "$prof_token dari $prof_total profil"
+    else
+      printf "  ${C_DIM}%-16s${C_NC} ${C_RED}%s${C_NC}\n" "Punya Token" "0 dari $prof_total profil, tempel token di /admin -> Akun Cloudflare"
+    fi
+    printf "  ${C_DIM}%-16s${C_NC} %s\n" "Profil Aktif" "${active_prof:-belum ada}"
+    printf "  ${C_DIM}%-16s${C_NC} %s\n" "Worker" "$prof_worker"
   else
-    printf "  ${C_DIM}%-16s${C_NC} ${C_RED}%s${C_NC}\n" "Login" "$wrangler_status"
+    printf "  ${C_DIM}%-16s${C_NC} ${C_DIM}%s${C_NC}\n" "Status" "profil tidak bisa dibaca dari API (systemctl status tempmail)"
   fi
-  printf "  ${C_DIM}%-16s${C_NC} %s\n" "Active Profile" "${active_prof:-belum ada}"
-  printf "  ${C_DIM}%-16s${C_NC} %s\n" "Worker" "$wrkr"
-  printf "  ${C_DIM}%-16s${C_NC} %s\n" "Profiles" "$prof_count profile"
   echo
 }
 
 full_setup() {
   cf_profiles_menu
   domains_menu
-  tunnel_login
-  create_tunnel
+  tunnel_setup_api
   deploy_worker
   echo "Pilih menu aktifkan routing untuk setiap domain yang ingin dipakai."
 }
@@ -662,13 +729,15 @@ guided_setup() {
 doctor() {
   local C_GREEN='\033[0;32m' C_RED='\033[0;31m' C_CYAN='\033[0;36m' C_YELLOW='\033[0;33m' C_BOLD='\033[1m' C_DIM='\033[2m' C_NC='\033[0m'
   local pass=0 fail=0
-  local port app_env api_key
+  local port app_env api_key tun_id="" web_url="" tun_status="" tun_conn=0
+  local cf_ok=0 cf_active="" cf_profiles=0 cf_domains=0 cf_routing="OFF" cf_worker="no"
+  local prof_json="" prof_parsed="" prof_ok=0 prof_total=0 prof_token=0 prof_active="" prof_has_token="no"
   app_env="$APP_ENV"
   port=$(app_port)
   api_key=$(grep '^EMAIL_API_KEY=' "$app_env" 2>/dev/null | cut -d= -f2)
 
   echo
-  echo -e "  ${C_BOLD}═══ TempMail Doctor — Health Check ═══${C_NC}"
+  echo -e "  ${C_BOLD}═══ TempMail Doctor - Health Check ═══${C_NC}"
   echo
 
   # 1. Binary exists
@@ -685,7 +754,7 @@ doctor() {
     echo -e "  ${C_GREEN}✓${C_NC} Service           : active"
     pass=$((pass+1))
   else
-    echo -e "  ${C_RED}✗${C_NC} Service           : inactive — jalankan: systemctl start tempmail"
+    echo -e "  ${C_RED}✗${C_NC} Service           : inactive - jalankan: systemctl start tempmail"
     fail=$((fail+1))
   fi
 
@@ -694,7 +763,7 @@ doctor() {
     echo -e "  ${C_GREEN}✓${C_NC} Config            : $app_env"
     pass=$((pass+1))
   else
-    echo -e "  ${C_RED}✗${C_NC} Config            : TIDAK ADA — $app_env"
+    echo -e "  ${C_RED}✗${C_NC} Config            : TIDAK ADA - $app_env"
     fail=$((fail+1))
   fi
 
@@ -703,7 +772,7 @@ doctor() {
     echo -e "  ${C_GREEN}✓${C_NC} JWT_SECRET        : set"
     pass=$((pass+1))
   else
-    echo -e "  ${C_RED}✗${C_NC} JWT_SECRET        : kosong — generate: openssl rand -hex 32"
+    echo -e "  ${C_RED}✗${C_NC} JWT_SECRET        : kosong - generate: openssl rand -hex 32"
     fail=$((fail+1))
   fi
 
@@ -712,7 +781,7 @@ doctor() {
     echo -e "  ${C_GREEN}✓${C_NC} EMAIL_API_KEY     : set"
     pass=$((pass+1))
   else
-    echo -e "  ${C_RED}✗${C_NC} EMAIL_API_KEY     : kosong — generate: openssl rand -hex 32"
+    echo -e "  ${C_RED}✗${C_NC} EMAIL_API_KEY     : kosong - generate: openssl rand -hex 32"
     fail=$((fail+1))
   fi
 
@@ -730,13 +799,13 @@ doctor() {
     echo -e "  ${C_GREEN}✓${C_NC} Database          : $APP/data/tempmail.db"
     pass=$((pass+1))
   else
-    echo -e "  ${C_RED}✗${C_NC} Database          : TIDAK ADA — akan dibuat saat start"
+    echo -e "  ${C_RED}✗${C_NC} Database          : TIDAK ADA - akan dibuat saat start"
     fail=$((fail+1))
   fi
 
   # 8. Local health check
   local health
-  health=$(curl -s --max-time 5 "http://127.0.0.1:$port/health" 2>/dev/null)
+  health=$(curl -s --max-time 5 "http://127.0.0.1:$port/health" 2>/dev/null || true)
   if echo "$health" | grep -q '"ok"'; then
     echo -e "  ${C_GREEN}✓${C_NC} Local health      : OK (port $port)"
     pass=$((pass+1))
@@ -752,19 +821,75 @@ doctor() {
     echo -e "  ${C_GREEN}✓${C_NC} Admin user        : $user_count admin"
     pass=$((pass+1))
   else
-    echo -e "  ${C_RED}✗${C_NC} Admin user        : belum ada — jalankan: curl -X POST http://127.0.0.1:$port/api/setup ..."
+    echo -e "  ${C_RED}✗${C_NC} Admin user        : belum ada - jalankan: curl -X POST http://127.0.0.1:$port/api/setup ..."
     fail=$((fail+1))
+  fi
+
+  # Status Cloudflare dari database lewat API, bukan dari state file.
+  local cf_status parsed
+  if cf_status=$(api_json GET /api/admin/cloudflare/status "" 15 2>/dev/null) && [ -n "$cf_status" ]; then
+    parsed=$(printf '%s' "$cf_status" | python3 -c '
+import json, sys
+d = json.load(sys.stdin)
+profiles = d.get("profiles") or []
+domains = d.get("domains") or []
+active = d.get("active_profile") or ""
+worker = "no"
+for p in profiles:
+    if p.get("id") == active and p.get("worker_deployed"):
+        worker = "yes"
+tunnel = d.get("tunnel") or {}
+print("\t".join([
+    active, str(len(profiles)), str(len(domains)),
+    "ON" if any(x.get("routing") for x in domains) else "OFF",
+    worker, tunnel.get("id") or "", tunnel.get("web_host") or "",
+    tunnel.get("status") or "", str(tunnel.get("connections") or 0),
+]))
+' 2>/dev/null) || parsed=""
+    if [ -n "$parsed" ]; then
+      cf_ok=1
+      IFS=$'\t' read -r cf_active cf_profiles cf_domains cf_routing cf_worker tun_id web_url tun_status tun_conn <<<"$parsed"
+    fi
+  fi
+
+  # Profil + token dari endpoint profil: dipakai cek API token (nomor 17).
+  if prof_json=$(api_json GET /api/admin/cloudflare/profiles "" 15 2>/dev/null) && [ -n "$prof_json" ]; then
+    prof_parsed=$(printf '%s' "$prof_json" | python3 -c '
+import json, sys
+items = json.load(sys.stdin)
+active = next((p for p in items if p.get("active")), None)
+print("\t".join([
+    str(len(items)),
+    str(sum(1 for p in items if p.get("has_token"))),
+    (active.get("id") or "") if active else "",
+    "yes" if (active and active.get("has_token")) else "no",
+]))
+' 2>/dev/null) || prof_parsed=""
+    if [ -n "$prof_parsed" ]; then
+      prof_ok=1
+      IFS=$'\t' read -r prof_total prof_token prof_active prof_has_token <<<"$prof_parsed"
+    fi
   fi
 
   echo
   echo -e "  ${C_BOLD}─── Cloudflare ───${C_NC}"
 
-  # 10. cert.pem
-  if [ -f /root/.cloudflared/cert.pem ]; then
-    echo -e "  ${C_GREEN}✓${C_NC} CF Tunnel login   : cert.pem ada"
+  # 10. Admin API + status Cloudflare
+  if [ "$cf_ok" = 1 ]; then
+    echo -e "  ${C_GREEN}✓${C_NC} CF API status     : OK ($(api_base)/api/admin/cloudflare/status)"
     pass=$((pass+1))
   else
-    echo -e "  ${C_RED}✗${C_NC} CF Tunnel login   : belum — menutempmail → 4"
+    echo -e "  ${C_RED}✗${C_NC} CF API status     : TIDAK MENJAWAB di $(api_base)/api/admin/cloudflare/status"
+    echo -e "  ${C_DIM}                      cek: systemctl status tempmail, lalu ADMIN_EMAIL/ADMIN_PASS di $app_env${C_NC}"
+    fail=$((fail+1))
+  fi
+
+  # 11. Konektor tunnel (status dari API Cloudflare)
+  if [ "$cf_ok" = 1 ] && { [ "$tun_status" = "healthy" ] || [ "$tun_status" = "degraded" ]; }; then
+    echo -e "  ${C_GREEN}✓${C_NC} Tunnel konektor   : $tun_status ($tun_conn koneksi)"
+    pass=$((pass+1))
+  elif [ "$cf_ok" = 1 ]; then
+    echo -e "  ${C_RED}✗${C_NC} Tunnel konektor   : ${tun_status:-belum ada} - menutempmail -> 4"
     fail=$((fail+1))
   fi
 
@@ -773,7 +898,7 @@ doctor() {
     echo -e "  ${C_GREEN}✓${C_NC} cloudflared svc   : active"
     pass=$((pass+1))
   else
-    echo -e "  ${C_RED}✗${C_NC} cloudflared svc   : inactive — systemctl start cloudflared"
+    echo -e "  ${C_RED}✗${C_NC} cloudflared svc   : inactive - systemctl start cloudflared"
     fail=$((fail+1))
   fi
 
@@ -786,69 +911,83 @@ doctor() {
     fail=$((fail+1))
   fi
 
-  # 13. Tunnel ID in state
-  local tun_id
-  tun_id=$(python3 -c "import json;d=json.load(open('$STATE'));print(d.get('tunnel',{}).get('id','') or '')" 2>/dev/null || echo "")
+  # 14. Tunnel ID dari database (status API)
   if [ -n "$tun_id" ]; then
     echo -e "  ${C_GREEN}✓${C_NC} Tunnel ID         : $tun_id"
     pass=$((pass+1))
   else
-    echo -e "  ${C_RED}✗${C_NC} Tunnel ID         : belum tersimpan di state"
+    echo -e "  ${C_RED}✗${C_NC} Tunnel ID         : belum tersimpan di database"
+    fail=$((fail+1))
+  fi
+
+  # 15. Profil Cloudflare di database
+  if [ "$cf_profiles" -gt 0 ]; then
+    echo -e "  ${C_GREEN}✓${C_NC} CF profiles       : $cf_profiles profil (aktif: ${cf_active:-belum})"
+    pass=$((pass+1))
+  elif [ "$cf_ok" = 1 ]; then
+    echo -e "  ${C_RED}✗${C_NC} CF profiles       : kosong - menutempmail → 1 (atau opsi 4 impor)"
+    fail=$((fail+1))
+  fi
+
+  # 16. Domain TempMail di database
+  if [ "$cf_domains" -gt 0 ]; then
+    echo -e "  ${C_GREEN}✓${C_NC} CF domains        : $cf_domains domain"
+    pass=$((pass+1))
+  elif [ "$cf_ok" = 1 ]; then
+    echo -e "  ${C_RED}✗${C_NC} CF domains        : kosong - menutempmail → 2"
     fail=$((fail+1))
   fi
 
   echo
-  echo -e "  ${C_BOLD}─── Wrangler ───${C_NC}"
+  echo -e "  ${C_BOLD}─── Worker + API token ───${C_NC}"
 
-  # 14. Wrangler token
-  local wrangler_status="belum"
-  if [ -f /root/.wrangler/config/default.toml ] && grep -q "oauth_token" /root/.wrangler/config/default.toml 2>/dev/null; then
-    wrangler_status="ok"
-  elif [ -f /root/.config/.wrangler/config/default.toml ] && grep -q "oauth_token" /root/.config/.wrangler/config/default.toml 2>/dev/null; then
-    wrangler_status="ok"
-  fi
-  if [ "$wrangler_status" = "ok" ]; then
-    echo -e "  ${C_GREEN}✓${C_NC} Wrangler login    : token ada"
+  # 17. API token profil aktif
+  if [ "$prof_ok" = 1 ] && [ "$prof_has_token" = "yes" ]; then
+    echo -e "  ${C_GREEN}✓${C_NC} API token profil  : ${prof_active} punya token"
     pass=$((pass+1))
+  elif [ "$prof_ok" = 1 ] && [ -z "$prof_active" ]; then
+    echo -e "  ${C_RED}✗${C_NC} API token profil  : belum ada profil aktif - menutempmail -> 1"
+    fail=$((fail+1))
+  elif [ "$prof_ok" = 1 ]; then
+    echo -e "  ${C_RED}✗${C_NC} API token profil  : ${prof_active} belum punya token ($prof_token dari $prof_total profil punya token)"
+    echo -e "  ${C_DIM}                      tempel (paste) API token Cloudflare untuk profil itu di /admin -> Akun Cloudflare${C_NC}"
+    fail=$((fail+1))
   else
-    echo -e "  ${C_RED}✗${C_NC} Wrangler login    : belum — menutempmail → 3"
+    echo -e "  ${C_RED}✗${C_NC} API token profil  : tidak bisa dibaca - systemctl status tempmail"
     fail=$((fail+1))
   fi
 
-  # 15. Worker deployed
-  local wrkr
-  wrkr=$(python3 -c "import json;d=json.load(open('$STATE'));ap=d.get('active_profile','');p=d.get('profiles',{}).get(ap,{});print('yes' if p.get('worker_deployed') else 'no')" 2>/dev/null || echo "no")
-  if [ "$wrkr" = "yes" ]; then
+  # 18. Worker deployed (status dari database via API)
+  if [ "$cf_worker" = "yes" ]; then
     echo -e "  ${C_GREEN}✓${C_NC} Worker            : deployed"
     pass=$((pass+1))
-  else
-    echo -e "  ${C_RED}✗${C_NC} Worker            : belum — menutempmail → 5"
+  elif [ "$cf_ok" = 1 ]; then
+    echo -e "  ${C_RED}✗${C_NC} Worker            : belum - menutempmail -> 5"
     fail=$((fail+1))
   fi
 
-  # 16. Worker directory
-  if [ -d "$WORKER_DIR" ] && [ -f "$WORKER_DIR/wrangler.toml" ]; then
-    echo -e "  ${C_GREEN}✓${C_NC} Worker dir        : $WORKER_DIR"
+  # 19. Spool helper root (aksi Server di panel admin menulis ke sini)
+  if [ -d "$HELPER_IN" ] && [ -w "$HELPER_IN" ]; then
+    echo -e "  ${C_GREEN}✓${C_NC} Helper spool      : $HELPER_IN (writable)"
     pass=$((pass+1))
   else
-    echo -e "  ${C_RED}✗${C_NC} Worker dir        : TIDAK ADA — install ulang"
+    echo -e "  ${C_RED}✗${C_NC} Helper spool      : $HELPER_IN tidak ada / tidak writable"
+    echo -e "  ${C_DIM}                      install.sh membuat dir ini; tanpa itu aksi Server di panel gagal.${C_NC}"
     fail=$((fail+1))
   fi
 
   echo
   echo -e "  ${C_BOLD}─── Tunnel Connectivity ───${C_NC}"
 
-  # 17. Tunnel health (remote)
-  local web_url
-  web_url=$(python3 -c "import json;d=json.load(open('$STATE'));print(d.get('tunnel',{}).get('web_host','') or '')" 2>/dev/null || echo "")
+  # 20. Tunnel health (remote), web host dari database via API
   if [ -n "$web_url" ]; then
     local remote_health
-    remote_health=$(curl -s --max-time 10 "https://$web_url/health" 2>/dev/null)
+    remote_health=$(curl -s --max-time 10 "https://$web_url/health" 2>/dev/null || true)
     if echo "$remote_health" | grep -q '"ok"'; then
       echo -e "  ${C_GREEN}✓${C_NC} Tunnel health     : OK (https://$web_url)"
       pass=$((pass+1))
     else
-      echo -e "  ${C_RED}✗${C_NC} Tunnel health     : GAGAL — cek cloudflared + config.yml"
+      echo -e "  ${C_RED}✗${C_NC} Tunnel health     : GAGAL - cek cloudflared + config.yml"
       fail=$((fail+1))
     fi
   else
@@ -856,10 +995,10 @@ doctor() {
     fail=$((fail+1))
   fi
 
-  # 18. API test via tunnel
+  # 21. API test via tunnel
   if [ -n "$web_url" ] && [ -n "$api_key" ]; then
     local api_test
-    api_test=$(curl -s --max-time 10 "https://$web_url/api/config" 2>/dev/null)
+    api_test=$(curl -s --max-time 10 "https://$web_url/api/config" 2>/dev/null || true)
     if echo "$api_test" | grep -q "domains"; then
       echo -e "  ${C_GREEN}✓${C_NC} API via tunnel    : OK"
       pass=$((pass+1))
@@ -869,26 +1008,26 @@ doctor() {
     fi
   fi
 
-  # 19. Email Routing status
-  local routing
-  routing=$(python3 -c "import json;d=json.load(open('$STATE'));doms=d.get('domains',{});print('ON' if any(v.get('routing') for v in doms.values()) else 'OFF')" 2>/dev/null || echo "OFF")
-  if [ "$routing" = "ON" ]; then
-    echo -e "  ${C_GREEN}✓${C_NC} Email Routing     : ON"
-    pass=$((pass+1))
-  else
-    echo -e "  ${C_RED}✗${C_NC} Email Routing     : OFF — menutempmail → 6"
-    fail=$((fail+1))
+  # 22. Email Routing status (dari database via API)
+  if [ "$cf_ok" = 1 ]; then
+    if [ "$cf_routing" = "ON" ]; then
+      echo -e "  ${C_GREEN}✓${C_NC} Email Routing     : ON"
+      pass=$((pass+1))
+    else
+      echo -e "  ${C_RED}✗${C_NC} Email Routing     : OFF - menutempmail → 6"
+      fail=$((fail+1))
+    fi
   fi
 
   echo
   echo -e "  ${C_BOLD}─── Backup ───${C_NC}"
 
-  # 20. SQLite backup timer
+  # 23. SQLite backup timer
   if systemctl is-active --quiet tempmail-backup.timer 2>/dev/null; then
     echo -e "  ${C_GREEN}✓${C_NC} Backup timer      : active"
     pass=$((pass+1))
   else
-    echo -e "  ${C_YELLOW}⚠${C_NC} Backup timer      : inactive — systemctl enable --now tempmail-backup.timer"
+    echo -e "  ${C_YELLOW}⚠${C_NC} Backup timer      : inactive - systemctl enable --now tempmail-backup.timer"
     fail=$((fail+1))
   fi
 
@@ -898,7 +1037,7 @@ doctor() {
   local total=$((pass+fail))
   if [ $fail -eq 0 ]; then
     echo -e "  ${C_GREEN}${C_BOLD}✓ ALL CHECKS PASSED ($pass/$total)${C_NC}"
-    echo -e "  ${C_GREEN}TempMail By JhopanStore — sehat sempurna!${C_NC}"
+    echo -e "  ${C_GREEN}TempMail By JhopanStore - sehat sempurna!${C_NC}"
   else
     echo -e "  ${C_GREEN}✓ Passed: $pass${C_NC}  ${C_RED}✗ Failed: $fail${C_NC}  ${C_DIM}(total: $total)${C_NC}"
     echo -e "  ${C_YELLOW}Perbaiki yang ✗ di atas.${C_NC}"
@@ -1001,7 +1140,10 @@ finally:
 }
 
 main() {
-  need_root; ensure_state
+  need_root; require_python; ensure_state
+  # Satu login per sesi menu: JWT disimpan di variabel shell dan dipakai ulang
+  # oleh semua panggilan API (login rate limit app hanya 5/menit).
+  api_login >/dev/null 2>&1 || true
   local C_GREEN='\033[0;32m' C_RED='\033[0;31m' C_CYAN='\033[0;36m' C_YELLOW='\033[0;33m' C_BOLD='\033[1m' C_DIM='\033[2m' C_NC='\033[0m'
   while true; do
     clear 2>/dev/null || true
@@ -1009,8 +1151,7 @@ main() {
     echo -e "  ${C_BOLD}─── Control Panel ───${C_NC}"
     echo -e "  ${C_CYAN}1${C_NC}) Kelola akun Cloudflare"
     echo -e "  ${C_CYAN}2${C_NC}) Kelola domain TempMail"
-    echo -e "  ${C_CYAN}3${C_NC}) Login Wrangler Cloudflare"
-    echo -e "  ${C_CYAN}4${C_NC}) Login + setup Cloudflare Tunnel"
+    echo -e "  ${C_CYAN}4${C_NC}) Setup tunnel Cloudflare ${C_DIM}(API token)${C_NC}"
     echo -e "  ${C_CYAN}5${C_NC}) Deploy/update Worker"
     echo -e "  ${C_CYAN}6${C_NC}) Aktifkan Email Routing catch-all"
     echo -e "  ${C_CYAN}7${C_NC}) Atur tujuan salinan email"
@@ -1020,7 +1161,6 @@ main() {
     echo -e "  ${C_GREEN}D${C_NC}) Doctor ${C_DIM}(cek semua status)${C_NC}"
     echo
     echo -e "  ${C_DIM}─── Maintenance ───${C_NC}"
-    echo -e "  ${C_RED}L1${C_NC}) Logout Wrangler"
     echo -e "  ${C_RED}L2${C_NC}) Logout CF Tunnel"
     echo -e "  ${C_RED}L3${C_NC}) RESET SEMUA credential Cloudflare"
     echo -e "  ${C_RED}L4${C_NC}) Hapus Worker ${C_DIM}(bersih-bersih)${C_NC}"
@@ -1030,13 +1170,12 @@ main() {
     echo
     read -r -p $'  \033[1mChoose:\033[0m ' choice
     case "$choice" in
-      1) cf_profiles_menu ;; 2) domains_menu ;; 3) login_wrangler ;;
-      4) tunnel_login; create_tunnel ;; 5) deploy_worker ;;
+      1) cf_profiles_menu ;; 2) domains_menu ;;
+      4) tunnel_setup_api ;; 5) deploy_worker ;;
       6) enable_routing_for_domain ;; 7) set_copy_destinations ;;
       8) guided_setup ;; 9) full_setup ;;
       A|a) manage_admin ;;
       D|d) doctor ;;
-      L1|l1) logout_wrangler ;;
       L2|l2) logout_tunnel ;;
       L3|l3) reset_all ;;
       L4|l4) delete_worker ;;

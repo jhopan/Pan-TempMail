@@ -372,6 +372,119 @@ X-Email-API-Key: your-api-key
 
 ---
 
+### 12. Cloudflare Control API (admin panel)
+
+Used by the web admin panel (`/admin`, which serves `/app/admin.html`) and by `menutempmail`. The panel
+is not linked from the inbox UI. Requires an admin JWT, not the automation key. Panel writes are the
+single source of truth: SQLite, not `/etc/tempmail/cloudflare-state.json`.
+
+**Auth:** `POST /api/auth/login` with an admin account, then send `Authorization: Bearer <token>`.
+Every route below lives under `/api/admin/cloudflare` and requires role `admin`.
+
+| Method | Path | Body | Response |
+|---|---|---|---|
+| GET | `/status` | - | aggregate state (see below) |
+| GET | `/profiles` | - | profile list |
+| POST | `/profiles` | `{"id","label","account_id","token","activate"}` | created profile |
+| PUT | `/profiles/{id}` | `{"label"?,"account_id"?,"token"?}` | updated profile |
+| DELETE | `/profiles/{id}` | - | `{"deleted":true}` (409 while domains use it) |
+| POST | `/profiles/{id}/activate` | - | `{"active_profile":"id"}` |
+| POST | `/profiles/{id}/deploy-worker` | `{}` | deploy result |
+| DELETE | `/profiles/{id}/worker` | - | `{"deleted":true}` |
+| GET | `/domains` | - | domain list |
+| POST | `/domains` | `{"domain","profile"?}` | created domain |
+| DELETE | `/domains/{domain}` | - | `{"deleted":true,"cloudflare_untouched":true}` |
+| POST | `/domains/{domain}/routing` | `{"routing":true,"unlock_dns":true}` | updated domain |
+| GET | `/tunnel` | - | tunnel status |
+| PUT | `/tunnel` | `{"web_host","name"}` | tunnel status |
+| POST | `/tunnel/create` | `{"name","web_host"}` | tunnel id, connector token, install commands |
+| GET | `/copies` | - | `{"destinations":[...]}` |
+| PUT | `/copies` | `{"destinations":[...]}` | destinations plus profiles that need a redeploy |
+| POST | `/import` | `{"state":{...}}` | counts imported from an old state file |
+
+**Profile shape:** `{"id","label","account_id","active","has_token","worker_deployed","domain_count"}`.
+**Domain shape:** `{"domain","profile","zone_id","enabled","routing"}`.
+**Tunnel shape:** `{"name","id","web_host","status","connections","account_id","source","error"}`.
+**`/status`** adds `active_profile`, `copies`, `worker_name`, `worker_compat_date`, `env_domains`, `api_base`.
+
+**Errors:** `{"error":"short message","detail":"raw Cloudflare message"}`. The Cloudflare
+detail is always forwarded, so a rejected token, a pending zone, or a non-Cloudflare MX setup
+shows the real reason instead of a silent failure.
+
+**Behaviour worth knowing:**
+
+- Adding a domain resolves its zone with the profile token and refuses zones that are missing or not `active`.
+- `routing:true` enables Email Routing, optionally unlocks DNS records (`unlock_dns`), then sets the catch-all to the Worker. `routing:false` disables the catch-all only.
+- Deleting a domain removes it from TempMail only; Cloudflare DNS, zone, and routing stay untouched.
+- `deploy-worker` uploads the embedded Worker script and sets `TEMPMAIL_SERVER_URL`, `TEMPMAIL_API_KEY`, and `FORWARD_LIST` as Worker secrets. No `wrangler` or Node.js is needed on the host.
+- API tokens are stored encrypted (AES-256-GCM, key derived from `JWT_SECRET`) and are never returned by any endpoint. Rotating `JWT_SECRET` invalidates stored tokens, so re-enter them after a rotation.
+- `tunnel/create` returns the connector token and the root commands to install `cloudflared`; the app never writes `/etc/cloudflared` or restarts the tunnel service itself.
+
+**Example:**
+
+```bash
+BASE=http://127.0.0.1:8081
+JWT=$(curl -s -X POST "$BASE/api/auth/login" -H 'Content-Type: application/json' \
+  -d '{"email":"admin@example.invalid","password":"your-password"}' | python3 -c 'import json,sys; print(json.load(sys.stdin)["token"])')
+
+curl -s "$BASE/api/admin/cloudflare/status" -H "Authorization: Bearer $JWT"
+
+curl -s -X POST "$BASE/api/admin/cloudflare/profiles" -H "Authorization: Bearer $JWT" \
+  -H 'Content-Type: application/json' \
+  -d '{"id":"cf-adelian","label":"Adelian","account_id":"<account-id>","token":"<api-token>","activate":true}'
+
+curl -s -X POST "$BASE/api/admin/cloudflare/domains" -H "Authorization: Bearer $JWT" \
+  -H 'Content-Type: application/json' -d '{"domain":"domain-b.example"}'
+
+curl -s -X POST "$BASE/api/admin/cloudflare/domains/domain-b.example/routing" \
+  -H "Authorization: Bearer $JWT" -H 'Content-Type: application/json' \
+  -d '{"routing":true,"unlock_dns":true}'
+```
+
+### 13. Server Actions API (root helper)
+
+The admin panel's `Server` section uses these. Requires an admin JWT. The app itself is unprivileged:
+requests go to the root helper through `/opt/tempmail/data/helper` (see `docs/RUNBOOK.md`).
+
+| Method | Path | Body | Response |
+|---|---|---|---|
+| GET | `/api/admin/system/status` | - | local facts, never blocks on the helper |
+| POST | `/api/admin/system/action` | `{"action":"logs","lines":100}` | helper result |
+
+Actions: `service-status`, `restart-service`, `backup-now`, `logs`, `doctor`, `tunnel-status`,
+`tunnel-install` (needs `token`), `tunnel-restart`, `tunnel-logout` (needs `confirm: "RESET"`).
+
+```bash
+BASE=http://127.0.0.1:8081
+JWT=$(curl -s -X POST "$BASE/api/auth/login" -H 'Content-Type: application/json' \
+  -d '{"email":"admin@example.invalid","password":"your-password"}' | python3 -c 'import json,sys; print(json.load(sys.stdin)["token"])')
+
+curl -s "$BASE/api/admin/system/status" -H "Authorization: Bearer $JWT"
+
+curl -s -X POST "$BASE/api/admin/system/action" -H "Authorization: Bearer $JWT" \
+  -H 'Content-Type: application/json' -d '{"action":"logs","lines":100}'
+```
+
+Status shape:
+
+```json
+{"helper":{"installed":true,"dir":"/opt/tempmail/data/helper","pending":0},
+ "db":{"path":"/opt/tempmail/data/tempmail.db","bytes":40960,"inboxes":2,"messages":5,"attachments":0},
+ "app":{"uptime_seconds":320,"rss_bytes":15728640,"go_version":"go1.25.0","site_name":"TempMail","port":"8081"},
+ "cloudflare":{"profiles":2,"domains":3,"active_profile":"cf-a","worker_name":"tempmailbyjhopanstore"}}
+```
+
+Action result:
+
+```json
+{"id":"a1b2c3d4e5f60718","action":"logs","ok":true,"status":"completed","output":"...","error":"","finished_at":"2026-11-12T10:00:00Z","seconds":0.42}
+```
+
+Errors: `400` action/param invalid (no request written), `501` helper not installed on this host,
+`504` helper did not answer in time (`HELPER_WAIT_SECONDS`, default 25; the request file stays queued
+and the helper processes it, and the timer retries every 30s). `restart-service` and `tunnel-logout`
+answer `{"status":"accepted"}` immediately because they cut the app or the tunnel connection.
+
 ## Complete Automation Flow
 
 ### Step-by-step
