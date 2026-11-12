@@ -58,6 +58,7 @@ function showPanel(name, options) {
   viewTitle.textContent = meta[0];
   viewSub.textContent = meta[1];
   document.title = meta[0] + " - Panel TempMail By JhopanStore";
+  document.dispatchEvent(new CustomEvent("panel:show", { detail: { panel: target } }));
   if (!options || !options.silent) {
     const heading = document.querySelector('#panel .panel[data-panel="' + target + '"] h2');
     if (heading) {

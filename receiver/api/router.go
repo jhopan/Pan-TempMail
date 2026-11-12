@@ -170,7 +170,9 @@ func SetupRouter() *gin.Engine {
 	apiRate, _ := limiter.NewRateFromFormatted("60-M")
 	delRate, _ := limiter.NewRateFromFormatted("20-M")
 	loginRate, _ := limiter.NewRateFromFormatted("10-M")
-	adminRate, _ := limiter.NewRateFromFormatted("30-M")
+	// One panel boot makes about ten calls and reactions are asynchronous, so the admin
+	// group needs more headroom than a bare 30 per minute.
+	adminRate, _ := limiter.NewRateFromFormatted("120-M")
 
 	apiStore := memory.NewStore()
 	delStore := memory.NewStore()

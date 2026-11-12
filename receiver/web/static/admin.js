@@ -176,14 +176,38 @@ async function apiRequest(base, path, options) {
     try { body = JSON.parse(text); } catch (parseErr) { body = null; }
   }
   if (!res.ok) {
+    const rateLimited = res.status === 429;
     throw {
-      error: (body && body.error) || ('HTTP ' + res.status),
+      error: rateLimited
+        ? 'Terlalu banyak permintaan ke API (batas per menit). Tunggu beberapa detik lalu tekan Muat ulang.'
+        : ((body && body.error) || ('HTTP ' + res.status)),
       detail: (body && body.detail) || '',
       status: res.status,
       requestId: (body && (body.request_id || body.id)) || '',
     };
   }
   return body;
+}
+
+// Dua endpoint status dipakai dashboard dan diagnostik sekaligus; cache pendek ini menjaga
+// satu panel boot tetap jauh di bawah batas permintaan per menit.
+const statusCache = new Map();
+
+async function cachedStatus(key, fetcher, ttlMs) {
+  const now = Date.now();
+  const hit = statusCache.get(key);
+  if (hit && now - hit.at < (ttlMs || 5000)) return hit.value;
+  const value = await fetcher();
+  statusCache.set(key, { at: now, value: value });
+  return value;
+}
+
+function loadSystemStatusCached() {
+  return cachedStatus('system', function () { return apiGet('/status'); });
+}
+
+function loadCloudflareStatusCached() {
+  return cachedStatus('cloudflare', function () { return cf('/status'); });
 }
 
 function cf(path, options) {
@@ -838,7 +862,7 @@ async function refreshDashboard() {
   let cfStatus = null;
   let cfError = null;
   try {
-    cfStatus = await cf('/status');
+    cfStatus = await loadCloudflareStatusCached();
   } catch (err) {
     cfError = withRequestId(err);
   }
@@ -869,7 +893,7 @@ async function loadSystemStatus() {
   const s = systemSlot();
   s.loading('Memuat status server...');
   try {
-    const out = await apiGet('/status');
+    const out = await loadSystemStatusCached();
     if (!out) {
       state.system = null;
       state.systemHelper = null;
@@ -1340,7 +1364,7 @@ async function loadDiagnostics() {
   const s = slot(ui.dgState, ui.dgWrap);
   s.loading('Memuat diagnostik...');
   clearMessage(ui.dgMsg);
-  const results = await Promise.allSettled([apiGet('/status'), cf('/status')]);
+  const results = await Promise.allSettled([loadSystemStatusCached(), loadCloudflareStatusCached()]);
   const sys = results[0].status === 'fulfilled' ? results[0].value : null;
   const cloud = results[1].status === 'fulfilled' ? results[1].value : null;
   const stamp = 'Diambil ' + formatWaktu(new Date());
@@ -1620,16 +1644,40 @@ function boot() {
   ui.imState.hidden = false;
   ui.imState.className = 'state empty';
   ui.imState.replaceChildren(node('span', 'state-text', 'Belum ada impor dijalankan. Tempel isi cloudflare-state.json lalu tekan Impor state.'));
-  loadProfiles();
-  loadDomains();
-  loadTunnel();
-  loadCopies();
   bindServer();
   applyHelperGate();
+  // Satu kunjungan panel dulu menembak sebelas endpoint sekaligus dan bisa kena batas
+  // permintaan per menit. Sekarang hanya Dashboard yang memuat data di awal; panel lain
+  // memuat saat pertama kali dibuka, dan Dashboard menyegarkan angkanya setiap dilihat.
+  document.addEventListener('panel:show', function (event) {
+    ensurePanelLoaded(event.detail && event.detail.panel);
+  });
   loadSystemStatus();
-  loadUsers();
-  loadNaming();
-  loadDiagnostics();
+}
+
+const panelLoaders = {
+  cloudflare: loadProfiles,
+  domains: loadDomains,
+  tunnel: loadTunnel,
+  copies: loadCopies,
+  users: loadUsers,
+  naming: loadNaming,
+  diagnostics: loadDiagnostics,
+  server: null,
+  dashboard: null,
+  import: null,
+};
+const panelLoaded = {};
+
+function ensurePanelLoaded(name) {
+  if (name === 'dashboard') {
+    refreshDashboard();
+    return;
+  }
+  const loader = panelLoaders[name];
+  if (!loader || panelLoaded[name]) return;
+  panelLoaded[name] = true;
+  loader();
 }
 
 boot();
