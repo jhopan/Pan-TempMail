@@ -370,7 +370,7 @@ else
     exit 1
   fi
 fi
-if api_call POST "/api/admin/cloudflare/domains/$DOMAIN/routing" '{"routing":true,"unlock_dns":true}' quiet; then
+if api_call POST "/api/admin/cloudflare/domains/$DOMAIN/routing" '{"routing":true}' quiet; then
   echo "Email Routing aktif dan catch-all diarahkan ke Worker."
 else
   api_show_error POST "/api/admin/cloudflare/domains/$DOMAIN/routing"

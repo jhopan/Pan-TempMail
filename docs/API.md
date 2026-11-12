@@ -403,7 +403,7 @@ Every route below lives under `/api/admin/cloudflare` and requires role `admin`.
 | GET | `/domains` | - | domain list |
 | POST | `/domains` | `{"domain","profile"?}` | created domain |
 | DELETE | `/domains/{domain}` | - | `{"deleted":true,"cloudflare_untouched":true}` |
-| POST | `/domains/{domain}/routing` | `{"routing":true,"unlock_dns":true}` | updated domain |
+| POST | `/domains/{domain}/routing` | `{"routing":true,"unlock_dns":false}` | updated domain (1) |
 | GET | `/domains/{domain}/check` | - | readiness checklist (zone, Worker, routing, Email DNS, web-host CNAME) |
 | POST | `/domains/{domain}/fix` | `{"cname"?,"routing"?,"worker"?,"email_dns"?,"overwrite_cname"?}` | `{"done":[...],"skipped":[...],"failed":[...]}` |
 | GET | `/tunnel` | - | tunnel status |
@@ -455,7 +455,8 @@ shows the real reason instead of a silent failure.
 - Adding a domain resolves its zone with the profile token and refuses zones that are missing or not `active`.
 - Adding a domain from a **different Cloudflare account** is the same flow with a second profile: create the profile, then add the domain and select that profile. The Worker is uploaded per profile, so every profile needs its own `deploy-worker` before its domains can route.
 - DNS writes are additive only: `POST /tunnel/cname` and the `cname`/`email_dns` parts of `POST /domains/{domain}/fix` create what is missing. No endpoint deletes DNS records.
-- `routing:true` enables Email Routing, optionally unlocks DNS records (`unlock_dns`), then sets the catch-all to the Worker. `routing:false` disables the catch-all only.
+- `routing:true` enables Email Routing, then sets the catch-all to the Worker. `routing:false` disables the catch-all only.
+- (1) `unlock_dns:true` is **destructive and off by default**: Cloudflare documents `DELETE /zones/{id}/email/routing/dns` as *"Disable your Email Routing zone. Also removes additional MX records previously required for Email Routing to work."* Mail for that domain stops until the Email Routing records exist again, which `POST /domains/{domain}/fix` with `email_dns:true` can restore. The panel labels it "matikan CF" and asks for confirmation; the setup scripts never send it.
 - Deleting a domain removes it from TempMail only; Cloudflare DNS, zone, and routing stay untouched.
 - `deploy-worker` uploads the embedded Worker script and sets `TEMPMAIL_SERVER_URL`, `TEMPMAIL_API_KEY`, and `FORWARD_LIST` as Worker secrets. No `wrangler` or Node.js is needed on the host.
 - API tokens are stored encrypted (AES-256-GCM, key derived from `JWT_SECRET`) and are never returned by any endpoint. Rotating `JWT_SECRET` invalidates stored tokens, so re-enter them after a rotation.

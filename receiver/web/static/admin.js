@@ -25,6 +25,7 @@ const state = {
     tunnel: null,
     domains: [],
     domainsChecked: false,
+    domainsTotal: 0,
     inbox: '',
     inboxTotal: null,
   },
@@ -566,18 +567,19 @@ function renderDomains() {
     routingCell.append(badge(d.routing ? 'ON' : 'OFF', !!d.routing));
     tr.append(routingCell);
     const unlockCell = node('td');
-    unlockCell.dataset.label = 'Unlock DNS';
+    unlockCell.dataset.label = 'Matikan CF';
     const unlockWrap = node('label', 'check');
     const unlock = node('input');
     unlock.type = 'checkbox';
-    unlock.setAttribute('aria-label', 'unlock DNS ' + d.domain);
-    unlockWrap.append(unlock, node('span', null, 'unlock DNS'));
+    unlock.setAttribute('aria-label', 'matikan Email Routing Cloudflare untuk ' + d.domain);
+    unlock.title = 'Mematikan Email Routing di Cloudflare dan menghapus MX bawaannya: email ke domain ini berhenti sampai record Email Routing dibuat ulang.';
+    unlockWrap.append(unlock, node('span', null, 'matikan CF'));
     unlockCell.append(unlockWrap);
     tr.append(unlockCell);
     const toggle = button(d.routing ? 'Disable routing' : 'Enable routing', 'btn btn-s small');
     toggle.addEventListener('click', function () {
       const want = !d.routing;
-      if (want && unlock.checked && !window.confirm('Aktifkan routing ' + d.domain + ' dan buka DNS routing di Cloudflare?')) return;
+      if (unlock.checked && !window.confirm('Opsi "matikan CF" akan mematikan Email Routing di Cloudflare dan menghapus MX bawaannya, jadi email ke ' + d.domain + ' berhenti sampai record dikembalikan. Lanjutkan?')) return;
       run(toggle, ui.domainsMsg, async function () {
         const out = await cf('/domains/' + encodeURIComponent(d.domain) + '/routing', {
           method: 'POST',
@@ -865,15 +867,17 @@ function setupDomainReady(check) {
   return !!(worker.deployed && routing.ok && emailDns.ready && webHost.ok);
 }
 
-function setupDomainLevel(entries) {
+function setupDomainLevel(entries, total) {
+  const checked = (entries || []).length;
+  const cap = total && total > checked ? ' (' + checked + ' dari ' + total + ' diperiksa)' : '';
   if (!state.setup.domainsChecked) {
-    return { level: 'warn', detail: 'Belum diperiksa. Tekan Periksa semua.' };
+    return { level: 'warn', detail: 'Belum diperiksa.' };
   }
   if (state.setup.domainsError) {
     return { level: 'bad', detail: state.setup.domainsError };
   }
   if (!entries || entries.length === 0) {
-    return { level: 'bad', detail: 'Belum ada domain terdaftar. Tambahkan domain dulu di panel Domain.' };
+    return { level: 'bad', detail: 'Belum ada domain terdaftar' };
   }
   let ready = 0;
   let failed = 0;
@@ -885,12 +889,12 @@ function setupDomainLevel(entries) {
     if (setupDomainReady(entry.check)) ready++;
   });
   if (failed) {
-    return { level: 'bad', detail: failed + '/' + entries.length + ' gagal diperiksa.' };
+    return { level: 'bad', detail: failed + '/' + entries.length + ' gagal diperiksa' + cap };
   }
   if (ready === entries.length) {
-    return { level: 'ok', detail: 'Semua ' + entries.length + ' domain siap.' };
+    return { level: 'ok', detail: 'Semua ' + entries.length + ' domain siap' + cap };
   }
-  return { level: 'warn', detail: ready + '/' + entries.length + ' domain siap.' };
+  return { level: 'warn', detail: ready + '/' + entries.length + ' domain siap' + cap };
 }
 
 function renderSetup() {
@@ -918,7 +922,7 @@ function renderSetup() {
   });
   steps.push(setupStepNode(3, 'Tunnel', tunnelInfo.level, tunnelInfo.detail, [cnameBtn]));
 
-  const domainInfo = setupDomainLevel(s.domains);
+  const domainInfo = setupDomainLevel(s.domains, s.domainsTotal);
   const checkDomainsBtn = button('Periksa domain', 'btn btn-p small');
   checkDomainsBtn.addEventListener('click', function () {
     run(checkDomainsBtn, ui.setupMsg, async function () {
@@ -1149,6 +1153,7 @@ async function checkSetupDomains() {
     entries.push(entry);
   }
   state.setup.domains = entries;
+  state.setup.domainsTotal = list.length;
 }
 
 async function refreshSetupDomain(domain) {
@@ -1625,23 +1630,37 @@ async function waitForHealth(timeoutMs, intervalMs) {
 }
 
 // renderServiceUnits menggambar satu titik per unit dari keluaran helper ("unit: state").
+// Helper menambahkan baris "enabled: ..." untuk unit aplikasi, jadi baris itu dijadikan
+// keterangan unit pertama, bukan unit baru.
+const SERVICE_STATES = ['active', 'inactive', 'failed', 'activating', 'deactivating', 'reloading', 'unknown'];
+
 function renderServiceUnits(body) {
   const output = body && body.output ? String(body.output) : '';
-  const rows = output.split('\n')
+  const units = [];
+  let enablement = '';
+  output.split('\n')
     .map(function (line) { return line.trim(); })
     .filter(Boolean)
-    .map(function (line) {
-      const at = line.lastIndexOf(':');
-      return at === -1 ? null : [line.slice(0, at), line.slice(at + 1).trim()];
-    })
-    .filter(function (row) { return row && row[0] && row[1]; });
-  if (!rows.length) {
+    .forEach(function (line) {
+      const at = line.indexOf(':');
+      if (at === -1) return;
+      const label = line.slice(0, at).trim();
+      const state = line.slice(at + 1).trim();
+      if (!label || !state) return;
+      if (SERVICE_STATES.indexOf(state.toLowerCase()) !== -1) {
+        units.push([label, state]);
+        return;
+      }
+      if (label === 'enabled') enablement = state;
+    });
+  if (!units.length) {
     ui.svUnits.replaceChildren(dotCell('Unit', 'tidak terbaca', 'warn'));
     return;
   }
-  ui.svUnits.replaceChildren(...rows.map(function (row) {
-    const running = ['active', 'running'].indexOf(row[1].toLowerCase()) !== -1;
-    return dotCell(shortUnit(row[0]), row[1], running ? 'ok' : 'bad');
+  ui.svUnits.replaceChildren(...units.map(function (unit, index) {
+    const running = ['active', 'running'].indexOf(unit[1].toLowerCase()) !== -1;
+    const note = index === 0 && enablement ? unit[1] + ' · boot ' + enablement : unit[1];
+    return dotCell(shortUnit(unit[0]), note, running ? 'ok' : 'bad');
   }));
 }
 

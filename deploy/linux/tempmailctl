@@ -582,7 +582,7 @@ enable_routing_for_domain() {
   [ -n "$domain" ] || return 0
   # Error Cloudflare (mis. token kurang izin) diteruskan apa adanya oleh API di "detail".
   api_call POST "/api/admin/cloudflare/domains/$domain/routing" \
-    '{"routing":true,"unlock_dns":true}' 60 || return 0
+    '{"routing":true}' 60 || return 0
   refresh_app_domains
   echo "Routing aktif: *@$domain → Worker → TempMail"
 }
