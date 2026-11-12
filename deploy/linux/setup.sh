@@ -269,8 +269,15 @@ echo
 echo "== [3/7] Login ke aplikasi =="
 ADMIN_EMAIL=$(grep '^ADMIN_EMAIL=' "$APP_ENV" 2>/dev/null | cut -d= -f2- || true)
 ADMIN_PASS=$(grep '^ADMIN_PASS=' "$APP_ENV" 2>/dev/null | cut -d= -f2- || true)
+if [ -z "$ADMIN_EMAIL" ]; then
+  read -r -p "Email admin: " ADMIN_EMAIL
+fi
+if [ -z "$ADMIN_PASS" ]; then
+  read -r -s -p "Password admin (tidak ditampilkan): " ADMIN_PASS || true
+  echo
+fi
 if [ -z "$ADMIN_EMAIL" ] || [ -z "$ADMIN_PASS" ]; then
-  echo "ADMIN_EMAIL/ADMIN_PASS belum ada di $APP_ENV."
+  echo "Email dan password admin wajib diisi."
   login_help
   exit 1
 fi

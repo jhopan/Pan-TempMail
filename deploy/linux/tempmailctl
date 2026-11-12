@@ -43,16 +43,33 @@ api_base() {
   fi
 }
 
-# Login admin pakai ADMIN_EMAIL/ADMIN_PASS dari env file. JWT hanya hidup di
-# variabel shell, tidak pernah ditulis ke disk atau dicetak.
+# Login admin. Kredensial diambil dari env file bila ada, kalau tidak ditanya
+# sekali per sesi menu. JWT hanya hidup di variabel shell, tidak ditulis ke disk
+# dan tidak pernah dicetak. TM_NO_PROMPT=1 mematikan pertanyaan (dipakai saat
+# membuka menu supaya tidak menanyakan password di awal).
 api_login() {
   [ -n "$TM_JWT" ] && return 0
   local email pass body out token
   email=$(grep '^ADMIN_EMAIL=' "$APP_ENV" 2>/dev/null | cut -d= -f2- || true)
   pass=$(grep '^ADMIN_PASS=' "$APP_ENV" 2>/dev/null | cut -d= -f2- || true)
+  if [ -z "$email" ]; then
+    if [ -n "${TM_ADMIN_EMAIL:-}" ]; then
+      email="$TM_ADMIN_EMAIL"
+    elif [ -t 0 ] && [ "${TM_NO_PROMPT:-0}" != "1" ]; then
+      read -r -p "Email admin: " email
+    fi
+  fi
+  if [ -z "$pass" ]; then
+    if [ -n "${TM_ADMIN_PASS:-}" ]; then
+      pass="$TM_ADMIN_PASS"
+    elif [ -t 0 ] && [ "${TM_NO_PROMPT:-0}" != "1" ]; then
+      read -r -s -p "Password admin (tidak ditampilkan): " pass
+      echo
+    fi
+  fi
   if [ -z "$email" ] || [ -z "$pass" ]; then
-    echo "ADMIN_EMAIL/ADMIN_PASS belum ada di $APP_ENV." >&2
-    echo "Set dulu lewat menu A (Kelola admin -> Reset password admin)." >&2
+    echo "Kredensial admin belum tersedia." >&2
+    echo "Jalankan menu dari terminal supaya bisa ditanya, set TM_ADMIN_EMAIL/TM_ADMIN_PASS, atau reset lewat panel /admin -> Pengguna." >&2
     return 1
   fi
   body=$(TM_EMAIL="$email" TM_PASS="$pass" python3 -c '
@@ -206,6 +223,17 @@ set_app_env() {
   printf '%s=%s\n' "$key" "$value" >>"$tmp"
   install -o root -g tempmail -m 0640 "$tmp" "$APP_ENV"
   rm -f "$tmp"
+}
+
+# Buang ADMIN_PASS plaintext dari env file; password hanya ditanya saat login.
+drop_admin_pass() {
+  local env_file=$1 tmp
+  grep -q '^ADMIN_PASS=' "$env_file" 2>/dev/null || return 0
+  tmp=$(mktemp)
+  grep -v '^ADMIN_PASS=' "$env_file" >"$tmp"
+  install -o root -g tempmail -m 0640 "$tmp" "$env_file"
+  rm -f "$tmp"
+  echo "  ADMIN_PASS dihapus dari $env_file"
 }
 
 active_profile() {
@@ -652,13 +680,7 @@ print("\t".join([
     printf "  ${C_DIM}%-16s${C_NC} ${C_RED}%s${C_NC} | %s\n" "Service" "${service:-inactive}" "${rss:-0 MiB}"
   fi
   printf "  ${C_DIM}%-16s${C_NC} %s\n" "Admin" "$admin_email"
-  local admin_pass
-  admin_pass=$(grep '^ADMIN_PASS=' "$APP_ENV" 2>/dev/null | cut -d= -f2)
-  if [ -n "$admin_pass" ]; then
-    printf "  ${C_DIM}%-16s${C_NC} %s\n" "Password" "$admin_pass"
-  else
-    printf "  ${C_DIM}%-16s${C_NC} %s\n" "Password" "(reset via menu A)"
-  fi
+  printf "  ${C_DIM}%-16s${C_NC} %s\n" "Password" "(ditanya saat login, tidak disimpan)"
   printf "  ${C_DIM}%-16s${C_NC} %s\n" "Domains" "$dom_val"
   printf "  ${C_DIM}%-16s${C_NC} ${C_CYAN}http://%s:%s/app/${C_NC}\n" "Web LAN" "$host" "$port"
   if [ -n "$web_url" ]; then
@@ -1057,14 +1079,14 @@ manage_admin() {
     echo
     echo -e "  ${C_BOLD}=== Kelola Admin ===${C_NC}"
     echo '  1. Buat admin baru (hanya jika belum ada)'
-    echo '  2. Lihat email + password admin'
+    echo '  2. Lihat email admin'
     echo '  3. Reset password admin'
     echo '  0. Kembali'
     read -r -p '  Choose: ' c
     case "$c" in
       1)
         read -r -p "  Email admin: " ad_email
-        read -r -p "  Password (min 6): " ad_pass
+        read -r -s -p "  Password (min 6, tidak ditampilkan): " ad_pass
         echo
         curl -s -X POST "$base/api/setup" \
           -H "Content-Type: application/json" \
@@ -1076,36 +1098,30 @@ try:
     else:
         print('  ✅ Admin dibuat:',d.get('user',{}).get('email',''))
 except: print('  Error: response tidak valid')"
-        # Simpan ke env file
-        if grep -q '^ADMIN_PASS=' "$app_env" 2>/dev/null; then
-          sed -i "s|^ADMIN_PASS=.*|ADMIN_PASS=$ad_pass|" "$app_env"
-        else
-          echo "ADMIN_PASS=$ad_pass" >> "$app_env"
-        fi
+        # Hanya email yang disimpan; password admin tidak lagi ditulis plaintext.
         if grep -q '^ADMIN_EMAIL=' "$app_env" 2>/dev/null; then
           sed -i "s|^ADMIN_EMAIL=.*|ADMIN_EMAIL=$ad_email|" "$app_env"
         else
           echo "ADMIN_EMAIL=$ad_email" >> "$app_env"
         fi
+        drop_admin_pass "$app_env"
         ;;
       2)
         echo
-        local em ps
+        local em
         em=$(sqlite3 /opt/tempmail/data/tempmail.db 'SELECT email FROM users WHERE role="admin" LIMIT 1;' 2>/dev/null || echo "belum ada")
-        ps=$(grep '^ADMIN_PASS=' "$app_env" 2>/dev/null | cut -d= -f2)
         echo -e "  ${C_DIM}Email${C_NC}    : ${C_GREEN}$em${C_NC}"
-        if [ -n "$ps" ]; then
-          echo -e "  ${C_DIM}Password${C_NC}: ${C_GREEN}$ps${C_NC}"
+        if grep -q '^ADMIN_PASS=' "$app_env" 2>/dev/null; then
+          echo -e "  ${C_DIM}Password${C_NC}: ${C_YELLOW}masih tersimpan plaintext di $app_env (jalankan opsi 3 untuk menghapusnya)${C_NC}"
         else
-          echo -e "  ${C_DIM}Password${C_NC}: ${C_RED}belum tersimpan di env${C_NC}"
-          echo "         Reset via opsi 3 untuk simpan"
+          echo -e "  ${C_DIM}Password${C_NC}: ${C_GREEN}tidak disimpan, ditanya saat login${C_NC}"
         fi
         echo
         ;;
       3)
         echo
         read -r -p "  Email admin: " ad_email
-        read -r -p "  Password baru (min 6): " ad_pass
+        read -r -s -p "  Password baru (min 6, tidak ditampilkan): " ad_pass
         echo
         python3 -c "
 import bcrypt, sqlite3
@@ -1120,19 +1136,14 @@ except Exception as e:
 finally:
     db.close()
 " 2>/dev/null || echo "  ❌ Butuh: pip install bcrypt"
-        # Simpan plain text ke env (root-only akses)
-        if grep -q '^ADMIN_PASS=' "$app_env" 2>/dev/null; then
-          sed -i "s|^ADMIN_PASS=.*|ADMIN_PASS=$ad_pass|" "$app_env"
-        else
-          echo "ADMIN_PASS=$ad_pass" >> "$app_env"
-        fi
         if grep -q '^ADMIN_EMAIL=' "$app_env" 2>/dev/null; then
           sed -i "s|^ADMIN_EMAIL=.*|ADMIN_EMAIL=$ad_email|" "$app_env"
         else
           echo "ADMIN_EMAIL=$ad_email" >> "$app_env"
         fi
+        drop_admin_pass "$app_env"
         chmod 640 "$app_env" 2>/dev/null || true
-        echo -e "  ${C_DIM}Password disimpan di $app_env${C_NC}"
+        echo -e "  ${C_DIM}Password tidak disimpan ke file; menu akan menanyakan saat login.${C_NC}"
         ;;
       0|*) break ;;
     esac
@@ -1142,8 +1153,10 @@ finally:
 main() {
   need_root; require_python; ensure_state
   # Satu login per sesi menu: JWT disimpan di variabel shell dan dipakai ulang
-  # oleh semua panggilan API (login rate limit app hanya 5/menit).
-  api_login >/dev/null 2>&1 || true
+  # oleh semua panggilan API (login rate limit app hanya 10/menit). Tanpa kredensial
+  # di env file, menu tidak menanyakan password di awal; pertanyaan muncul saat
+  # memang dibutuhkan.
+  TM_NO_PROMPT=1 api_login >/dev/null 2>&1 || true
   local C_GREEN='\033[0;32m' C_RED='\033[0;31m' C_CYAN='\033[0;36m' C_YELLOW='\033[0;33m' C_BOLD='\033[1m' C_DIM='\033[2m' C_NC='\033[0m'
   while true; do
     clear 2>/dev/null || true

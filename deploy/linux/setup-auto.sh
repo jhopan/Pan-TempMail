@@ -286,10 +286,12 @@ export CF_TOKEN
 
 echo
 echo "== [3/7] Login ke aplikasi =="
-ADMIN_EMAIL=$(grep '^ADMIN_EMAIL=' "$APP_ENV" 2>/dev/null | cut -d= -f2- || true)
-ADMIN_PASS=$(grep '^ADMIN_PASS=' "$APP_ENV" 2>/dev/null | cut -d= -f2- || true)
+TM_ENV_EMAIL=$(grep '^ADMIN_EMAIL=' "$APP_ENV" 2>/dev/null | cut -d= -f2- || true)
+TM_ENV_PASS=$(grep '^ADMIN_PASS=' "$APP_ENV" 2>/dev/null | cut -d= -f2- || true)
+ADMIN_EMAIL=${ADMIN_EMAIL:-$TM_ENV_EMAIL}
+ADMIN_PASS=${ADMIN_PASSWORD:-${ADMIN_PASS:-$TM_ENV_PASS}}
 if [ -z "$ADMIN_EMAIL" ] || [ -z "$ADMIN_PASS" ]; then
-  echo "ADMIN_EMAIL/ADMIN_PASS belum ada di $APP_ENV."
+  echo "Butuh ADMIN_EMAIL dan ADMIN_PASSWORD (atau ADMIN_PASS di $APP_ENV)."
   login_help
   exit 1
 fi
