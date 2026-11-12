@@ -37,7 +37,7 @@ No Maddy, PostgreSQL, Node.js runtime, Nginx, or public port 25 is required for 
 | `receiver/smtp` | direct/local SMTP ingestion |
 | `receiver/parser` | RFC822/MIME parsing |
 | `receiver/repository` | SQL operations; DB-dialect placeholders |
-| `receiver/database` | SQLite default, optional PostgreSQL connection/migrations |
+| `receiver/database` | SQLite default (`modernc.org/sqlite`, pure Go) and optional PostgreSQL (`github.com/lib/pq`, registered via blank import) |
 | `receiver/cleanup` | TTL purge and SQLite optimization |
 | `receiver/web` | `go:embed` static UI: inbox (`/app/`) plus the sidebar admin panel (`/admin`, landing panel `Dashboard`) |
 

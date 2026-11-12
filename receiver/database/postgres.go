@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	_ "github.com/lib/pq"  // PostgreSQL, hanya dipakai saat DB_DRIVER=postgres
 	_ "modernc.org/sqlite" // Pure-Go SQLite, no CGO needed
 )
 

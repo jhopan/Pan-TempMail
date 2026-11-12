@@ -253,6 +253,23 @@ Pitfalls:
 - Domain names are unique across the whole instance, so the same domain cannot be registered twice.
 - The web host CNAME belongs to the account that owns the web-host zone, not to every profile.
 
+## PostgreSQL (opsional)
+
+SQLite adalah default dan yang dipakai produksi. PostgreSQL hanya perlu kalau kamu memang ingin naik
+skala; driver `github.com/lib/pq` sudah terdaftar, jadi aplikasi benar-benar mencoba koneksi (bukan
+gagal di "unknown driver").
+
+```bash
+# contoh: database di host yang sama
+DB_DRIVER=postgres DB_HOST=127.0.0.1 DB_PORT=5432 \
+DB_USER=tempmail DB_PASSWORD=... DB_NAME=tempmail
+```
+
+Migrasi dijalankan otomatis saat start (`receiver/database`). Status verifikasi: jalur koneksi,
+migrasi, dan kueri memakai `placeholder()` sehingga tidak ada dialek SQLite yang bocor; uji end-to-end
+terhadap server PostgreSQL hidup belum dijalankan di mesin ini (tidak ada server PG dan Docker daemon
+dimatikan). Jalankan `go test ./...` plus satu putaran terima email sebelum memakainya di produksi.
+
 ## Backup and restore
 
 ```bash
