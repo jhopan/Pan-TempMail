@@ -9,6 +9,9 @@ const NAV_PANELS = {
   tunnel: ["Tunnel", "Tunnel Cloudflare dan web host yang dipakai Worker."],
   copies: ["Salinan email", "Tembusan email opsional ke alamat lain."],
   import: ["Impor state", "Muat profil dan domain dari cloudflare-state.json lama."],
+  users: ["Pengguna", "Akun panel beserta role, ganti role, reset password, dan hapus akun."],
+  naming: ["Aturan nama", "Pola local-part inbox yang dibuat otomatis saat username tidak diisi."],
+  diagnostics: ["Diagnostik", "Fakta helper, aplikasi, database, dan Cloudflare dalam satu layar baca."],
 };
 const NAV_DEFAULT = "status";
 

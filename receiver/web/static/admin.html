@@ -184,6 +184,16 @@
           <small>helper, aplikasi, database</small></button>
         <button class="nav-item" type="button" data-panel="server">Server
           <small>service, backup, log, doctor</small></button>
+        <button class="nav-item" type="button" data-panel="diagnostics">Diagnostik
+          <small>helper, aplikasi, database, Cloudflare</small></button>
+      </nav>
+
+      <nav class="nav-group" aria-label="Akun">
+        <p>Akun</p>
+        <button class="nav-item" type="button" data-panel="users">Pengguna
+          <small>akun panel &amp; role</small></button>
+        <button class="nav-item" type="button" data-panel="naming">Aturan nama
+          <small>alamat inbox otomatis</small></button>
       </nav>
 
       <nav class="nav-group" aria-label="Cloudflare">
@@ -263,6 +273,49 @@
             </div>
           </div>
           <div id="svHelperNote" class="note warn" hidden></div>
+        </section>
+
+        <section class="panel card" data-panel="diagnostics" aria-labelledby="hDiagnostics">
+          <div class="card-head">
+            <div>
+              <h2 id="hDiagnostics">Diagnostik</h2>
+              <p class="note">Gabungan fakta dari GET /api/admin/system/status dan GET /api/admin/cloudflare/status. Panel ini hanya membaca; aksi helper root ada di panel Server.</p>
+            </div>
+            <div class="row-actions">
+              <button id="dgReloadBtn" class="btn btn-s small" type="button">Muat ulang</button>
+            </div>
+          </div>
+          <p class="note" id="dgFetched">Belum ada data diambil.</p>
+          <div id="dgState" class="state" role="status"></div>
+          <div id="dgWrap" hidden>
+            <div class="cards-2">
+              <div>
+                <h3>Helper root</h3>
+                <dl class="kv" id="dgHelper"></dl>
+              </div>
+              <div>
+                <h3>Aplikasi</h3>
+                <dl class="kv" id="dgApp"></dl>
+              </div>
+              <div>
+                <h3>Database</h3>
+                <dl class="kv" id="dgDb"></dl>
+              </div>
+              <div>
+                <h3>Cloudflare</h3>
+                <dl class="kv" id="dgCf"></dl>
+              </div>
+              <div>
+                <h3>Tunnel</h3>
+                <dl class="kv" id="dgTunnel"></dl>
+              </div>
+              <div>
+                <h3>Domain temp mail</h3>
+                <ul class="list" id="dgCfDomains"></ul>
+              </div>
+            </div>
+          </div>
+          <div id="dgMsg" class="out" role="status" aria-live="polite"></div>
         </section>
 
         <section class="panel card" data-panel="server" aria-labelledby="hServer" id="serverSection">
@@ -484,6 +537,99 @@
               <button id="imBtn" class="btn btn-p" type="submit">Impor state</button>
             </div>
           </form>
+        </section>
+
+        <section class="panel card" data-panel="users" aria-labelledby="hUsers">
+          <div class="card-head">
+            <div>
+              <h2 id="hUsers">Pengguna</h2>
+              <p class="note">Akun panel dari GET /api/admin/users. Role admin bisa membuka /admin, role user hanya bisa masuk lewat API. Password hanya dikirim satu arah dan tidak pernah ditampilkan kembali.</p>
+            </div>
+            <button id="usReloadBtn" class="btn btn-s small" type="button">Muat ulang</button>
+          </div>
+          <div id="usState" class="state" role="status"></div>
+          <div id="usWrap" class="table-wrap" hidden>
+            <table>
+              <thead>
+                <tr>
+                  <th>Email</th><th>Role</th><th>Dibuat</th><th>Ganti role</th><th>Password baru</th><th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="usBody"></tbody>
+            </table>
+          </div>
+          <div id="usMsg" class="out" role="status" aria-live="polite"></div>
+          <h3>Tambah pengguna</h3>
+          <form id="usForm" class="grid">
+            <div class="field">
+              <label for="usEmail">Email</label>
+              <input id="usEmail" type="email" required autocomplete="off" placeholder="operator@example.com">
+            </div>
+            <div class="field">
+              <label for="usPassword">Password</label>
+              <input id="usPassword" type="password" required minlength="6" autocomplete="new-password" placeholder="minimal 6 karakter">
+              <span class="hint">Password dikirim sekali saat akun dibuat, kolom ini dikosongkan setelah dikirim dan tidak bisa dibaca lagi dari panel.</span>
+            </div>
+            <div class="field">
+              <label for="usRole">Role</label>
+              <select id="usRole">
+                <option value="user">user</option>
+                <option value="admin">admin</option>
+              </select>
+            </div>
+            <div class="form-actions">
+              <button id="usAddBtn" class="btn btn-p" type="submit">Tambah pengguna</button>
+            </div>
+          </form>
+        </section>
+
+        <section class="panel card" data-panel="naming" aria-labelledby="hNaming">
+          <div class="card-head">
+            <div>
+              <h2 id="hNaming">Aturan nama</h2>
+              <p class="note">Dipakai server saat alamat inbox dibuat tanpa username. Token template yang dikenali: {first}, {second}, {sep}, {num}, {rand:N}, {ts}.</p>
+            </div>
+            <button id="nmReloadBtn" class="btn btn-s small" type="button">Muat ulang</button>
+          </div>
+          <div id="nmState" class="state" role="status"></div>
+          <form id="nmForm" class="grid" hidden>
+            <div class="field">
+              <label for="nmTemplate">Template</label>
+              <input id="nmTemplate" spellcheck="false" placeholder="{first}{sep}{second}{num}">
+              <span class="hint">Susunan token untuk local-part alamat, misalnya {first}{sep}{second}{num}.</span>
+            </div>
+            <div class="field">
+              <label for="nmSeparator">Pemisah</label>
+              <input id="nmSeparator" spellcheck="false" placeholder="kosong berarti tanpa pemisah">
+              <span class="hint">Teks pengganti token {sep}, misalnya titik atau garis bawah.</span>
+            </div>
+            <div class="field">
+              <label for="nmNumMin">Angka minimum</label>
+              <input id="nmNumMin" type="number" inputmode="numeric" min="0" step="1">
+            </div>
+            <div class="field">
+              <label for="nmNumMax">Angka maksimum</label>
+              <input id="nmNumMax" type="number" inputmode="numeric" min="0" step="1">
+            </div>
+            <div class="field">
+              <label for="nmNumProb">Peluang angka (persen)</label>
+              <input id="nmNumProb" type="number" inputmode="numeric" min="0" max="100" step="1">
+            </div>
+            <div class="field">
+              <label for="nmFirst">first_words (JSON array)</label>
+              <textarea id="nmFirst" rows="5" spellcheck="false"></textarea>
+              <span class="hint">Array string untuk token {first}, satu kata per elemen.</span>
+            </div>
+            <div class="field">
+              <label for="nmSecond">second_words (JSON array)</label>
+              <textarea id="nmSecond" rows="5" spellcheck="false"></textarea>
+              <span class="hint">Array string untuk token {second}, satu kata per elemen.</span>
+            </div>
+            <div class="form-actions">
+              <button id="nmSaveBtn" class="btn btn-p" type="submit">Simpan aturan nama</button>
+            </div>
+          </form>
+          <div id="nmMsg" class="out" role="status" aria-live="polite"></div>
         </section>
       </main>
 

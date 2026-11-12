@@ -8,6 +8,7 @@ const HEALTH_INTERVAL_MS = 1500;
 const state = {
   profiles: [],
   domains: [],
+  users: [],
   tunnel: null,
   copies: [],
   workerName: '',
@@ -94,6 +95,39 @@ const ui = {
   svMsg: document.getElementById('svMsg'),
   svOutputMeta: document.getElementById('svOutputMeta'),
   svOutput: document.getElementById('svOutput'),
+  usReloadBtn: document.getElementById('usReloadBtn'),
+  usState: document.getElementById('usState'),
+  usWrap: document.getElementById('usWrap'),
+  usBody: document.getElementById('usBody'),
+  usMsg: document.getElementById('usMsg'),
+  usForm: document.getElementById('usForm'),
+  usEmail: document.getElementById('usEmail'),
+  usPassword: document.getElementById('usPassword'),
+  usRole: document.getElementById('usRole'),
+  usAddBtn: document.getElementById('usAddBtn'),
+  nmReloadBtn: document.getElementById('nmReloadBtn'),
+  nmState: document.getElementById('nmState'),
+  nmForm: document.getElementById('nmForm'),
+  nmTemplate: document.getElementById('nmTemplate'),
+  nmSeparator: document.getElementById('nmSeparator'),
+  nmNumMin: document.getElementById('nmNumMin'),
+  nmNumMax: document.getElementById('nmNumMax'),
+  nmNumProb: document.getElementById('nmNumProb'),
+  nmFirst: document.getElementById('nmFirst'),
+  nmSecond: document.getElementById('nmSecond'),
+  nmSaveBtn: document.getElementById('nmSaveBtn'),
+  nmMsg: document.getElementById('nmMsg'),
+  dgReloadBtn: document.getElementById('dgReloadBtn'),
+  dgFetched: document.getElementById('dgFetched'),
+  dgState: document.getElementById('dgState'),
+  dgWrap: document.getElementById('dgWrap'),
+  dgHelper: document.getElementById('dgHelper'),
+  dgApp: document.getElementById('dgApp'),
+  dgDb: document.getElementById('dgDb'),
+  dgCf: document.getElementById('dgCf'),
+  dgTunnel: document.getElementById('dgTunnel'),
+  dgCfDomains: document.getElementById('dgCfDomains'),
+  dgMsg: document.getElementById('dgMsg'),
 };
 
 let lastFocus = null;
@@ -957,6 +991,308 @@ function renderCopies() {
   });
 }
 
+// --- users (akun panel) ---
+
+const USERS_BASE = '/api/admin/users';
+const NAMING_BASE = '/api/admin/naming-rules';
+
+function usersReq(path, options) {
+  return apiRequest(USERS_BASE, path, options);
+}
+
+function namingReq(options) {
+  return apiRequest(NAMING_BASE, '', options);
+}
+
+function formatWaktu(value) {
+  if (!value) return '-';
+  const d = new Date(value);
+  if (isNaN(d.getTime())) return String(value);
+  return d.toLocaleString('id-ID', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+}
+
+// Identitas pemakai panel ada di localStorage.auth_user (ditulis app.js saat login).
+function currentUser() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem('auth_user') || '{}');
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch (err) {
+    return {};
+  }
+}
+
+function isSelfUser(user, me) {
+  if (!user || !me) return false;
+  if (me.id !== undefined && me.id !== null && user.id !== undefined && user.id !== null) {
+    return Number(me.id) === Number(user.id);
+  }
+  return Boolean(me.email) && me.email === user.email;
+}
+
+function usersSlot() {
+  return slot(ui.usState, ui.usWrap);
+}
+
+async function loadUsers() {
+  const s = usersSlot();
+  ui.usBody.replaceChildren();
+  s.loading('Memuat pengguna...');
+  try {
+    const users = await usersReq('', { method: 'GET' });
+    state.users = Array.isArray(users) ? users : [];
+    renderUsers();
+  } catch (err) {
+    s.error(err);
+  }
+}
+
+function userRow(user, me) {
+  const tr = node('tr');
+  const self = isSelfUser(user, me);
+
+  const emailCell = cell('Email', user.email, 'mono');
+  if (self) {
+    emailCell.append(node('span', 'badge', 'akun sendiri'));
+  }
+  tr.append(emailCell);
+
+  const roleCell = node('td');
+  roleCell.dataset.label = 'Role';
+  roleCell.append(badge(user.role === 'admin' ? 'admin' : 'user', user.role === 'admin'));
+  tr.append(roleCell);
+
+  tr.append(cell('Dibuat', user.created_at ? formatWaktu(user.created_at) : '-'));
+
+  const roleBox = node('td');
+  roleBox.dataset.label = 'Ganti role';
+  const roleSelect = node('select');
+  roleSelect.setAttribute('aria-label', 'Role baru untuk ' + user.email);
+  ['user', 'admin'].forEach(function (value) {
+    const opt = node('option', null, value);
+    opt.value = value;
+    if (user.role === value) opt.selected = true;
+    roleSelect.append(opt);
+  });
+  const saveRole = button('Simpan role', 'btn btn-s small');
+  saveRole.addEventListener('click', function () {
+    const next = roleSelect.value;
+    if (next === user.role) {
+      message(ui.usMsg, 'error', 'Role ' + user.email + ' sudah ' + user.role, 'Pilih role lain dulu sebelum menyimpan');
+      return;
+    }
+    run(saveRole, ui.usMsg, async function () {
+      // Handler Go menuntut email dan role sekaligus (binding required), jadi email ikut dikirim apa adanya.
+      await usersReq('/' + user.id, { method: 'PUT', body: JSON.stringify({ email: user.email, role: next }) });
+      await loadUsers();
+      message(ui.usMsg, 'ok', 'Role ' + user.email + ' menjadi ' + next);
+    });
+  });
+  roleBox.append(roleSelect, saveRole);
+  tr.append(roleBox);
+
+  const pwBox = node('td');
+  pwBox.dataset.label = 'Password baru';
+  const pwInput = document.createElement('input');
+  pwInput.type = 'password';
+  pwInput.autocomplete = 'new-password';
+  pwInput.spellcheck = false;
+  pwInput.placeholder = 'password baru';
+  pwInput.setAttribute('aria-label', 'Password baru untuk ' + user.email);
+  const resetBtn = button('Reset password', 'btn btn-danger small');
+  resetBtn.addEventListener('click', function () {
+    // Password ditulis satu arah: dibaca sekali, kolom langsung dikosongkan, tidak pernah ditampilkan lagi.
+    const value = pwInput.value;
+    pwInput.value = '';
+    if (value.length < 6) {
+      message(ui.usMsg, 'error', 'Password baru minimal 6 karakter', 'Isi kolom password baru di baris ' + user.email + ', kolom dikosongkan setiap kali tombol ditekan');
+      return;
+    }
+    if (!window.confirm('Ganti password akun ' + user.email + ' (id ' + user.id + ')? Password lama langsung tidak berlaku.')) return;
+    run(resetBtn, ui.usMsg, async function () {
+      await usersReq('/' + user.id + '/password', { method: 'PUT', body: JSON.stringify({ password: value }) });
+      message(ui.usMsg, 'ok', 'Password ' + user.email + ' diganti', 'Serahkan password baru langsung ke pemilik akun, panel tidak menyimpannya');
+    });
+  });
+  pwBox.append(pwInput, resetBtn);
+  tr.append(pwBox);
+
+  const drop = button('Hapus pengguna', 'btn btn-danger small');
+  if (self) {
+    drop.disabled = true;
+    drop.title = 'Akun yang sedang dipakai tidak bisa dihapus dari panel';
+  }
+  drop.addEventListener('click', function () {
+    if (self) return;
+    if (!window.confirm('Hapus pengguna ' + user.email + ' (id ' + user.id + ')? Akun ini langsung tidak bisa login.')) return;
+    run(drop, ui.usMsg, async function () {
+      await usersReq('/' + user.id, { method: 'DELETE' });
+      await loadUsers();
+      message(ui.usMsg, 'ok', 'Pengguna ' + user.email + ' terhapus');
+    });
+  });
+  tr.append(actionCell([drop]));
+  return tr;
+}
+
+function renderUsers() {
+  const s = usersSlot();
+  if (state.users.length === 0) {
+    s.empty('Belum ada akun pengguna. Tambahkan lewat form di bawah.');
+    return;
+  }
+  s.ok();
+  const me = currentUser();
+  state.users.forEach(function (user) {
+    ui.usBody.append(userRow(user, me));
+  });
+}
+
+// --- aturan nama ---
+
+function namingSlot() {
+  return slot(ui.nmState, ui.nmForm);
+}
+
+function namingJsonArray(label, raw) {
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (err) {
+    throw { error: label + ' bukan JSON yang valid', detail: err.message };
+  }
+  if (!Array.isArray(parsed)) {
+    throw { error: label + ' harus array JSON', detail: 'Contoh: ["kata","kata lain"]' };
+  }
+  const words = parsed.map(function (item) { return String(item).trim(); }).filter(Boolean);
+  if (words.length === 0) {
+    throw { error: label + ' tidak boleh kosong', detail: 'Isi minimal satu kata per elemen' };
+  }
+  return words;
+}
+
+function namingNumber(label, input) {
+  const value = parseInt(input.value, 10);
+  if (isNaN(value) || value < 0) {
+    throw { error: label + ' harus angka 0 atau lebih', detail: 'Perbaiki kolom ' + label };
+  }
+  return value;
+}
+
+function renderNaming(rules) {
+  ui.nmTemplate.value = rules.template || '';
+  ui.nmSeparator.value = rules.separator || '';
+  ui.nmNumMin.value = String(countOf(rules.num_min));
+  ui.nmNumMax.value = String(countOf(rules.num_max));
+  ui.nmNumProb.value = String(countOf(rules.num_probability));
+  ui.nmFirst.value = JSON.stringify(Array.isArray(rules.first_words) ? rules.first_words : [], null, 2);
+  ui.nmSecond.value = JSON.stringify(Array.isArray(rules.second_words) ? rules.second_words : [], null, 2);
+}
+
+async function loadNaming() {
+  const s = namingSlot();
+  s.loading('Memuat aturan nama...');
+  try {
+    const rules = await namingReq({ method: 'GET' });
+    if (!rules || typeof rules !== 'object' || Array.isArray(rules)) {
+      s.empty('API tidak mengembalikan aturan nama. Muat ulang untuk mencoba lagi.');
+      return;
+    }
+    renderNaming(rules);
+    s.ok();
+  } catch (err) {
+    s.error(err);
+  }
+}
+
+// --- diagnostik ---
+
+function diagnosticsTunnelRows(tunnel) {
+  if (!tunnel) {
+    return [['Status', 'tidak diketahui'], ['Nama', '-'], ['Koneksi', '-']];
+  }
+  return [
+    ['Status', tunnel.status || 'unknown'],
+    ['Nama', tunnel.name || '-'],
+    ['ID', tunnel.id || '-'],
+    ['Koneksi', String(countOf(tunnel.connections))],
+    ['Web host', tunnel.web_host || '-'],
+    ['Sumber', tunnel.source || '-'],
+  ];
+}
+
+async function loadDiagnostics() {
+  const s = slot(ui.dgState, ui.dgWrap);
+  s.loading('Memuat diagnostik...');
+  clearMessage(ui.dgMsg);
+  const results = await Promise.allSettled([apiGet('/status'), cf('/status')]);
+  const sys = results[0].status === 'fulfilled' ? results[0].value : null;
+  const cloud = results[1].status === 'fulfilled' ? results[1].value : null;
+  const stamp = 'Diambil ' + formatWaktu(new Date());
+  if (!sys && !cloud) {
+    ui.dgFetched.textContent = stamp + ' (gagal)';
+    s.error(results[0].reason || results[1].reason);
+    return;
+  }
+  const helper = (sys && sys.helper) || {};
+  const app = (sys && sys.app) || {};
+  const db = (sys && sys.db) || {};
+  const sysCf = (sys && sys.cloudflare) || {};
+  s.ok();
+  fillKv(ui.dgHelper, [
+    ['Terpasang', sys ? (helper.installed ? 'terpasang' : 'belum terpasang') : 'tidak diketahui'],
+    ['Direktori', helper.dir || '-'],
+    ['Request tertunda', sys ? String(countOf(helper.pending)) : '-'],
+  ]);
+  fillKv(ui.dgApp, [
+    ['Uptime', sys ? formatUptime(app.uptime_seconds) : '-'],
+    ['RAM', sys ? formatMb(app.rss_bytes) : '-'],
+    ['Versi Go', app.go_version || '-'],
+    ['Port', app.port || '-'],
+    ['Site name', app.site_name || '-'],
+  ]);
+  fillKv(ui.dgDb, [
+    ['Ukuran file', sys ? formatBytes(db.bytes) + ' (' + countOf(db.bytes) + ' byte)' : '-'],
+    ['Path', db.path || '-'],
+    ['Inbox', sys ? String(countOf(db.inboxes)) : '-'],
+    ['Pesan', sys ? String(countOf(db.messages)) : '-'],
+    ['Lampiran', sys ? String(countOf(db.attachments)) : '-'],
+  ]);
+  const copies = (cloud && Array.isArray(cloud.copies)) ? cloud.copies : [];
+  fillKv(ui.dgCf, [
+    ['Profil', String(countOf(sysCf.profiles))],
+    ['Domain', String(countOf(sysCf.domains))],
+    ['Profil aktif', (cloud && cloud.active_profile) || sysCf.active_profile || '-'],
+    ['Nama Worker', (cloud && cloud.worker_name) || sysCf.worker_name || '-'],
+    ['Tanggal kompatibilitas Worker', (cloud && cloud.worker_compat_date) || '-'],
+    ['api_base', (cloud && cloud.api_base) || '-'],
+    ['Tujuan salinan', cloud ? String(copies.length) + ' alamat' : '-'],
+  ]);
+  fillKv(ui.dgTunnel, diagnosticsTunnelRows(cloud && cloud.tunnel));
+  ui.dgCfDomains.replaceChildren();
+  const domains = (cloud && Array.isArray(cloud.domains)) ? cloud.domains : [];
+  if (domains.length === 0) {
+    ui.dgCfDomains.append(node('li', null, cloud ? 'Belum ada domain terdaftar di database.' : 'Daftar domain butuh status Cloudflare yang berhasil dimuat.'));
+  } else {
+    domains.forEach(function (d) {
+      const li = node('li');
+      li.append(node('span', 'mono', d.domain));
+      li.append(badge(d.routing ? 'routing ON' : 'routing OFF', !!d.routing));
+      li.append(node('span', null, d.profile ? 'profil ' + d.profile : 'profil aktif'));
+      li.append(node('span', null, d.enabled ? 'aktif' : 'nonaktif'));
+      ui.dgCfDomains.append(li);
+    });
+  }
+  const failed = [];
+  if (!sys) failed.push('status sistem');
+  if (!cloud) failed.push('status Cloudflare');
+  ui.dgFetched.textContent = stamp + (failed.length ? ' (sebagian gagal: ' + failed.join(', ') + ')' : '');
+  if (failed.length) {
+    const reason = (!sys && results[0].reason) || (!cloud && results[1].reason);
+    const info = apiFailure(reason instanceof Error ? { error: reason.message } : reason);
+    message(ui.dgMsg, 'error', 'Sebagian data gagal dimuat: ' + failed.join(' dan '), info.detail || info.message);
+  }
+}
+
 // --- boot ---
 
 function renderGate(user) {
@@ -1083,6 +1419,74 @@ function bindSections() {
       }
     });
   });
+
+  ui.usReloadBtn.addEventListener('click', function () { run(ui.usReloadBtn, ui.usMsg, loadUsers); });
+
+  ui.usForm.addEventListener('submit', function (event) {
+    event.preventDefault();
+    clearMessage(ui.usMsg);
+    const email = ui.usEmail.value.trim();
+    const password = ui.usPassword.value;
+    const role = ui.usRole.value;
+    // Password ditulis satu arah: dibaca sekali, kolom langsung dikosongkan.
+    ui.usPassword.value = '';
+    if (password.length < 6) {
+      message(ui.usMsg, 'error', 'Password minimal 6 karakter', 'Isi ulang kolom password, kolom dikosongkan setelah setiap kirim');
+      return;
+    }
+    run(ui.usAddBtn, ui.usMsg, async function () {
+      await usersReq('', { method: 'POST', body: JSON.stringify({ email: email, password: password, role: role }) });
+      ui.usForm.reset();
+      await loadUsers();
+      message(ui.usMsg, 'ok', 'Pengguna ' + email + ' ditambahkan dengan role ' + role);
+    });
+  });
+
+  ui.nmReloadBtn.addEventListener('click', function () { run(ui.nmReloadBtn, ui.nmMsg, loadNaming); });
+
+  ui.nmForm.addEventListener('submit', function (event) {
+    event.preventDefault();
+    clearMessage(ui.nmMsg);
+    let payload;
+    try {
+      const min = namingNumber('Angka minimum', ui.nmNumMin);
+      const max = namingNumber('Angka maksimum', ui.nmNumMax);
+      const probability = namingNumber('Peluang angka', ui.nmNumProb);
+      if (max < min) {
+        throw { error: 'Angka maksimum lebih kecil dari minimum', detail: 'Angka minimum ' + min + ', maksimum ' + max };
+      }
+      if (probability > 100) {
+        throw { error: 'Peluang angka maksimal 100 persen', detail: 'Nilai sekarang ' + probability };
+      }
+      payload = {
+        template: ui.nmTemplate.value.trim(),
+        separator: ui.nmSeparator.value,
+        first_words: namingJsonArray('first_words', ui.nmFirst.value),
+        second_words: namingJsonArray('second_words', ui.nmSecond.value),
+        num_min: min,
+        num_max: max,
+        num_probability: probability,
+      };
+      if (!payload.template) {
+        throw { error: 'Template kosong', detail: 'Isi template, misalnya {first}{sep}{second}{num}' };
+      }
+    } catch (err) {
+      const info = apiFailure(err);
+      message(ui.nmMsg, 'error', info.message, info.detail);
+      return;
+    }
+    run(ui.nmSaveBtn, ui.nmMsg, async function () {
+      const out = await namingReq({ method: 'PUT', body: JSON.stringify(payload) });
+      const rules = (out && out.rules) || payload;
+      renderNaming(rules);
+      message(ui.nmMsg, 'ok', 'Aturan nama disimpan',
+        'template ' + rules.template + ', first_words ' + countOf((rules.first_words || []).length) +
+        ', second_words ' + countOf((rules.second_words || []).length) +
+        ', angka ' + rules.num_min + '-' + rules.num_max + ' pada peluang ' + rules.num_probability + ' persen');
+    });
+  });
+
+  ui.dgReloadBtn.addEventListener('click', function () { run(ui.dgReloadBtn, ui.dgMsg, loadDiagnostics); });
 }
 
 function boot() {
@@ -1107,6 +1511,9 @@ function boot() {
   bindServer();
   applyHelperGate();
   loadSystemStatus();
+  loadUsers();
+  loadNaming();
+  loadDiagnostics();
 }
 
 boot();
