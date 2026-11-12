@@ -109,6 +109,7 @@ const ui = {
   svBackupBtn: document.getElementById('svBackupBtn'),
   svRestartBtn: document.getElementById('svRestartBtn'),
   svDoctorBtn: document.getElementById('svDoctorBtn'),
+  svCfInstallBtn: document.getElementById('svCfInstallBtn'),
   svTnStatusBtn: document.getElementById('svTnStatusBtn'),
   svTnRestartBtn: document.getElementById('svTnRestartBtn'),
   svTnForm: document.getElementById('svTnForm'),
@@ -960,8 +961,22 @@ function renderSetup() {
   const steps = [];
 
   const helperInfo = s.helper || { level: 'warn', detail: 'Belum diperiksa.' };
+  const cfInstallBtn = button('Pasang cloudflared', 'btn btn-s small');
+  cfInstallBtn.addEventListener('click', function () {
+    run(cfInstallBtn, ui.setupMsg, async function () {
+      const body = await apiPost('/action', { action: 'install-cloudflared' });
+      const lines = outputLines(body);
+      const failed = !!(body && body.ok === false);
+      message(ui.setupMsg, failed ? 'error' : 'ok',
+        failed ? (lines.length ? lines[lines.length - 1] : (body.error || 'Pasang cloudflared ditolak helper'))
+          : 'Pemasangan cloudflared selesai',
+        lines.length ? lines.join(' · ').slice(0, 200) : 'status: ' + ((body && body.status) || 'unknown'));
+      await checkSetupHelper();
+      renderSetup();
+    });
+  });
   steps.push(setupStepNode(1, 'Helper root', helperInfo.level, helperInfo.detail,
-    [setupLink('Buka panel Server', '#server')]));
+    [setupLink('Buka panel Server', '#server'), cfInstallBtn]));
 
   const profileInfo = s.profile || { level: 'warn', detail: 'Belum diperiksa.' };
   steps.push(setupStepNode(2, 'Profil Cloudflare', profileInfo.level, profileInfo.detail,
@@ -1247,7 +1262,7 @@ function systemSlot() {
 function helperButtons() {
   return [
     ui.svServiceBtn, ui.svLogBtn, ui.svBackupBtn, ui.svRestartBtn, ui.svDoctorBtn,
-    ui.svTnStatusBtn, ui.svTnInstallBtn, ui.svTnRestartBtn, ui.svTnLogoutBtn,
+    ui.svCfInstallBtn, ui.svTnStatusBtn, ui.svTnInstallBtn, ui.svTnRestartBtn, ui.svTnLogoutBtn,
   ];
 }
 
@@ -1611,6 +1626,15 @@ async function loadSystemStatus() {
   }
 }
 
+// Keluaran helper selalu `key: value` per baris: panel memakainya untuk pesan singkat, sementara
+// blok keluaran tetap menampilkan teks mentah apa adanya.
+function outputLines(body) {
+  return (body && body.output ? String(body.output) : '')
+    .split('\n')
+    .map(function (line) { return line.trim(); })
+    .filter(Boolean);
+}
+
 function renderActionOutput(out) {
   const body = (out && typeof out === 'object') ? out : {};
   const status = body.status || 'unknown';
@@ -1843,6 +1867,21 @@ function bindServer() {
     runAction(ui.svDoctorBtn, async function () {
       const body = renderActionOutput(await apiPost('/action', { action: 'doctor' }));
       announceAction(body, 'Doctor selesai memeriksa helper, env, data dir, dan cloudflared');
+    });
+  });
+
+  // dpkg memasang paket sebagai root, jadi panel tetap meminta konfirmasi seperti aksi lain.
+  ui.svCfInstallBtn.addEventListener('click', function () {
+    if (!window.confirm('Unduh dan pasang paket cloudflared resmi di server sekarang? Paket .deb dipasang dengan dpkg -i.')) return;
+    runAction(ui.svCfInstallBtn, async function () {
+      const body = renderActionOutput(await apiPost('/action', { action: 'install-cloudflared' }));
+      const lines = outputLines(body);
+      if (body && body.ok === false) {
+        message(ui.svMsg, 'error', lines.length ? lines[lines.length - 1] : (body.error || 'Pasang cloudflared gagal'),
+          'status: ' + (body.status || 'unknown'));
+        return;
+      }
+      announceAction(body, 'cloudflared terpasang, keluaran helper ada di blok di bawah');
     });
   });
 

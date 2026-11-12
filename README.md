@@ -110,7 +110,7 @@ sudo cp /tmp/tempmail /opt/tempmail/tempmail
 sudo chown tempmail:tempmail /opt/tempmail/tempmail
 ```
 
-### Step 4: Configure
+### Step 4: Configure (opsional)
 
 ```bash
 sudo nano /etc/tempmail/tempmail.env
@@ -119,27 +119,26 @@ sudo nano /etc/tempmail/tempmail.env
 ```ini
 PORT=8081
 DOMAINS=your-domain.com
-JWT_SECRET=          # openssl rand -hex 32
-EMAIL_API_KEY=       # openssl rand -hex 32
+JWT_SECRET=          # kosongkan: dibuat otomatis ke data/secrets.env (0600)
+EMAIL_API_KEY=       # kosongkan: dibuat otomatis, dipakai juga sebagai binding Worker
 SITE_NAME=TempMail By JhopanStore
 GIN_MODE=release
 ```
 
-### Step 5: Start + create admin
+### Step 5: Start + buat admin di browser
 
 ```bash
 sudo systemctl start tempmail
-
-curl -X POST http://127.0.0.1:8081/api/setup \
-  -H "Content-Type: application/json" \
-  -d '{"email":"your@email.com","password":"your-password"}'
 ```
+
+Buka `http://<host>:8081/app/login.html`. Kalau belum ada user, halaman itu menampilkan form
+**Buat admin pertama** (email, password, ulangi password); setelah dibuat kamu langsung masuk. CLI
+hanya dipakai kalau kamu memang mau: `POST /api/setup {"email","password"}` saat belum ada user.
 
 ### Step 6: Cloudflare setup
 
-```bash
-menutempmail → 8
-```
+Semua dari browser: buka `/admin`, klik **Setup**, isi API token Cloudflare, tambah domain, lalu
+**Rapikan**. Kalau lebih suka menu: `menutempmail → 8` (SETUP GUIDED).
 
 ### Step 7: Verify
 

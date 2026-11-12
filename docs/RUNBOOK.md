@@ -49,13 +49,37 @@ sudo systemctl restart tempmail
 
 ## First admin
 
-Only run when no users exist:
+Dari browser (cara normal): buka `http://<host>:<port>/app/login.html`. Selama belum ada user,
+halaman itu menampilkan form **Buat admin pertama** (email, password minimal 6 karakter, ulangi
+password) dan langsung masuk setelah dibuat. Tidak ada CLI yang dibutuhkan untuk langkah ini.
+
+Alternatif CLI, hanya saat benar-benar belum ada user:
 
 ```bash
 curl -X POST http://127.0.0.1:8080/api/setup \
   -H 'Content-Type: application/json' \
   -d '{"email":"admin@example.invalid","password":"replace-with-long-unique-password"}'
 ```
+
+`GET /api/setup` menjawab `{"needs_setup":true|false}` tanpa membocorkan apa pun selain boolean itu,
+sehingga halaman login tahu mode mana yang harus tampil. Setelah ada user, `POST /api/setup` menolak
+dengan `409`.
+
+## Rahasia saat pertama jalan
+
+`JWT_SECRET` dan `EMAIL_API_KEY` tidak wajib diset. Kalau environment kosong, aplikasi membuat nilai
+acak sekali lalu menyimpannya di `<data dir>/secrets.env` (default `/opt/tempmail/data/secrets.env`,
+izin 0600) dan mencatat lokasinya di log. Aturan yang dipakai:
+
+| Keadaan | Perilaku |
+|---|---|
+| Salah satu/both di-set di environment | nilai itu menang dan **tidak** ditulis ke berkas |
+| Berkas sudah punya nilai | dipakai ulang, tidak dibuat baru |
+| Berkas tidak bisa ditulis | aplikasi berhenti dengan pesan jelas, bukan memakai kunci sementara |
+
+`EMAIL_API_KEY` yang dibuat otomatis dipakai juga sebagai binding Worker saat `deploy-worker`, jadi
+tidak perlu disalin manual. Kalau kamu mengganti nilainya di environment, deploy ulang Worker untuk
+setiap profil supaya binding-nya ikut berubah.
 
 Do not put real password commands in shell history. Use interactive API client/UI where possible.
 
@@ -123,8 +147,9 @@ Important:
 ## Panel server actions (root helper)
 
 The panel section `Server` can restart the app service, run the SQLite backup, list the SQLite
-backups, show journald logs, run doctor checks, read the tunnel config, and install/restart/logout the
-tunnel. All of it goes through the root helper; the app itself stays unprivileged.
+backups, show journald logs, run doctor checks, read the tunnel config, install the `cloudflared`
+package, and install/restart/logout the tunnel. All of it goes through the root helper; the app
+itself stays unprivileged.
 
 Check the helper:
 
@@ -151,11 +176,12 @@ Notes:
 
 - `restart-service` waits 2 seconds by default before restarting, so the HTTP answer reaches the panel; the panel then polls `/health` until the service is back.
 - `tunnel-install` needs a connector token from the panel's Tunnel section (`POST /api/admin/cloudflare/tunnel/create`).
+- `install-cloudflared` takes no fields: it reports `binary_before`, `version`, `package`, `service` and installs the official `cloudflared-linux-<arch>.deb` (amd64/arm64) with `curl` + `dpkg -i` only when the binary is missing; an already working binary is never reinstalled.
 - `tunnel-config` reports how the named tunnel authenticates (mode, tunnel id, credentials path, ingress hostnames, token presence) from `/etc/cloudflared/config.yml`; it is read-only and never prints the token.
 - `backup-list` reports `count`/`latest`/`latest_bytes`/`latest_age_seconds`/`total_bytes` for `/opt/tempmail/backups`; an empty or missing directory answers `latest: -` with zeros, not an error.
 - `tunnel-logout` deletes `/etc/cloudflared` and `/root/.cloudflared`; it requires the operator to type `RESET` in the panel.
 - A rejected request still produces a result file, and the request file is always removed afterwards; if requests pile up in `helper/in`, check `journalctl -u tempmail-root.service`.
-- Helper environment overrides (`HELPER_SYSTEMCTL`, `HELPER_JOURNALCTL`, `HELPER_CLOUDFLARED`, `HELPER_TUNNEL_CONFIG`, `HELPER_BACKUP_DIR`, `HELPER_TEST_MODE`) exist for offline testing of the helper itself; the installed systemd unit never sets them, so do not add them to the unit.
+- Helper environment overrides (`HELPER_SYSTEMCTL`, `HELPER_JOURNALCTL`, `HELPER_CLOUDFLARED`, `HELPER_CURL`, `HELPER_DPKG`, `HELPER_TUNNEL_CONFIG`, `HELPER_BACKUP_DIR`, `HELPER_TEST_MODE`) exist for offline testing of the helper itself; the installed systemd unit never sets them, so do not add them to the unit.
 
 ## Admin password
 

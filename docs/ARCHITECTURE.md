@@ -78,6 +78,7 @@ Cloudflare state lives in SQLite, so the admin panel and `menutempmail` read and
 ```text
 GET    /health
 GET    /api/config
+GET    /api/setup                         public: {"needs_setup": bool} only
 POST   /api/setup
 POST   /api/auth/login
 POST   /api/email/receive                 Worker auth: X-Email-API-Key
@@ -144,7 +145,7 @@ tempmail-root.timer (retry every 30s, safety net)
         ▼
 /usr/local/sbin/tempmail-root --once                    root, oneshot, Python
   validate: JSON schema, 4 KiB cap, owner == tempmail, no symlink, action allowlist, arg rules
-  execute:  systemctl / journalctl / cloudflared, argument list only, never a shell
+  execute:  systemctl / journalctl / cloudflared / curl / dpkg, argument list only, never a shell
   write     /opt/tempmail/data/helper/out/<id>.json      result, 0640, root:tempmail
         ▼
 TempMail app reads the result, deletes it, returns it to the admin panel
@@ -153,10 +154,10 @@ TempMail app reads the result, deletes it, returns it to the admin panel
 Rules that keep this safe:
 
 - No `sudoers` entry and no change to the app's systemd sandbox; the app never gains root.
-- Allowlist only: `service-status`, `restart-service`, `backup-now`, `backup-list`, `logs`, `doctor`, `tunnel-status`, `tunnel-config`, `tunnel-install`, `tunnel-restart`, `tunnel-logout`. Anything else is rejected.
+- Allowlist only: `service-status`, `restart-service`, `backup-now`, `backup-list`, `logs`, `doctor`, `tunnel-status`, `tunnel-config`, `tunnel-install`, `tunnel-restart`, `tunnel-logout`, `install-cloudflared`. Anything else is rejected.
 - `backup-list` and `tunnel-config` are read-only reports for the panel: the backup directory contents, and how the named tunnel authenticates (mode, tunnel id, credentials path, ingress hostnames, token presence). Neither echoes a token value or needs a Cloudflare API token.
 - Parameters are validated (`lines` 1-500, tunnel token charset, `RESET` confirmation for logout) and passed as an argument list, never interpolated into a shell.
-- Cooldowns per mutating action (`restart-service` 10s, `tunnel-install` 30s, `tunnel-logout` 60s, `backup-now` 10s) block request loops.
+- Cooldowns per mutating action (`restart-service` 10s, `tunnel-install` 30s, `tunnel-logout` 60s, `backup-now` 10s, `install-cloudflared` 30s) block request loops.
 - The helper always answers: a rejected request still gets a `rejected` result, then the request file is removed, so the spool cannot wedge.
 - `HELPER_DIR` belongs to the app user, `helper/state` belongs to root, results are 0640 root:tempmail.
 - With the helper units disabled the panel still works and reports `helper belum dipasang`; service/log/tunnel actions are refused with `501`.

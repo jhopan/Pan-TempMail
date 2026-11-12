@@ -276,6 +276,21 @@ func Health(c *gin.Context) {
 	})
 }
 
+// SetupStatus reports whether the instance still needs its first admin user.
+// Free of secrets: it exposes only a boolean, so the login page can decide
+// whether to render the "create first admin" form.
+// GET /api/setup -> {"needs_setup": true|false}
+func SetupStatus(c *gin.Context) {
+	var count int
+	db := database.Conn()
+	if err := db.QueryRowContext(c.Request.Context(), "SELECT COUNT(*) FROM users").Scan(&count); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Database error"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"needs_setup": count == 0})
+}
+
 // SeedAdmin creates the first admin user. Only works if no users exist.
 // POST /api/setup {"email":"admin@example.com","password":"..."}
 func SeedAdmin(c *gin.Context) {

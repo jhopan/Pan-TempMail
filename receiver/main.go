@@ -6,11 +6,13 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
 	"receiver/api"
 	"receiver/cleanup"
+	"receiver/config"
 	"receiver/database"
 	"receiver/smtp"
 
@@ -20,6 +22,19 @@ import (
 func main() {
 	// Load .env if present (optional — env vars can be set directly)
 	_ = godotenv.Load()
+
+	// Rahasia bisa dibuat otomatis: aplikasi tetap bisa dinyalakan tanpa .env, dan
+	// nilainya disimpan 0600 supaya sesi panel serta binding Worker tidak berubah
+	// setiap restart. Environment selalu menang.
+	secretsPath := config.DefaultSecretsPath()
+	generated, err := config.EnsureSecrets(os.Getenv, os.Setenv, secretsPath)
+	if err != nil {
+		log.Fatalf("secrets: %v", err)
+	}
+	if len(generated) > 0 {
+		log.Printf("Rahasia dibuat otomatis (%s), disimpan di %s dengan izin 0600. Set lewat environment untuk menimpa.",
+			strings.Join(generated, ", "), secretsPath)
+	}
 
 	// Startup banner
 	siteName := os.Getenv("SITE_NAME")

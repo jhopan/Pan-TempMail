@@ -196,7 +196,10 @@ func SetupRouter() *gin.Engine {
 	// Public config endpoint (for frontend to read domains)
 	r.GET("/api/config", web.ConfigHandler)
 
-	// First-time admin seed (only works if no admin exists)
+	// First-time admin seed (only works if no admin exists).
+	// GET reports whether the first admin is still needed so the login page can
+	// show the create-admin form without any authenticated call.
+	r.GET("/api/setup", handlers.SetupStatus)
 	r.POST("/api/setup", handlers.SeedAdmin)
 
 	// Email receive via HTTP (Cloudflare Worker endpoint)

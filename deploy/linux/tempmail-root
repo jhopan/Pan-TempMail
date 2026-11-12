@@ -17,6 +17,7 @@ import argparse
 import grp
 import json
 import os
+import platform
 import pwd
 import re
 import shlex
@@ -24,6 +25,7 @@ import shutil
 import signal
 import subprocess
 import sys
+import tempfile
 import time
 
 HELPER_DIR = os.environ.get("HELPER_DIR", "/opt/tempmail/data/helper")
@@ -55,6 +57,11 @@ CONFIG_LINE_RE = re.compile(r"^([A-Za-z0-9_.-]+)\s*:\s*(.*)$")
 BLOCK_SCALAR_RE = re.compile(r"^[|>][+-]?$")
 TUNNEL_MAX_HOSTS = 5
 
+# The .deb comes from Cloudflare's own release page; only the arch tag below varies.
+CLOUDFLARED_DEB_URL = "https://github.com/cloudflare/cloudflared/releases/latest/download/"
+# platform.machine() -> the arch tag Cloudflare uses in its .deb file names.
+DEB_ARCHES = {"x86_64": "amd64", "amd64": "amd64", "aarch64": "arm64", "arm64": "arm64"}
+
 # action -> (cooldown seconds, fire and forget)
 ACTIONS = {
     "service-status": (0, False),
@@ -68,6 +75,7 @@ ACTIONS = {
     "tunnel-restart": (10, False),
     "tunnel-config": (0, False),
     "tunnel-logout": (60, True),
+    "install-cloudflared": (30, False),
 }
 
 ALLOWED_FIELDS = {"id", "action", "lines", "token", "confirm", "delay", "requested_by"}
@@ -103,9 +111,31 @@ def cloudflared_cmd():
     return command_for("HELPER_CLOUDFLARED", "cloudflared")
 
 
-def cloudflared_available():
-    cmd = cloudflared_cmd()
+def curl_cmd():
+    return command_for("HELPER_CURL", "curl")
+
+
+def dpkg_cmd():
+    return command_for("HELPER_DPKG", "dpkg")
+
+
+def command_available(cmd):
     return bool(shutil.which(cmd[0]) or os.path.isfile(cmd[0]))
+
+
+def cloudflared_available():
+    return command_available(cloudflared_cmd())
+
+
+def cloudflared_version():
+    """First line of `cloudflared --version`, or "-" when the binary is missing or fails."""
+    if not cloudflared_available():
+        return "-"
+    code, out = run(cloudflared_cmd() + ["--version"], timeout=10)
+    first = (out or "").strip().splitlines()
+    if code != 0 or not first:
+        return "-"
+    return first[0].strip()
 
 
 def clip(text, limit=MAX_OUTPUT_BYTES):
@@ -550,6 +580,62 @@ def action_tunnel_logout(_):
     return True, "\n".join(lines)
 
 
+def tunnel_service_state():
+    """Active state of the tunnel service, or "-" when systemd cannot answer."""
+    _, state = unit_active(TUNNEL_SERVICE)
+    return state if state and state != "unknown" else "-"
+
+
+def action_install_cloudflared(_):
+    """Install the official cloudflared .deb so a fresh host needs no manual apt step.
+
+    A working binary is reported, never reinstalled. Only the architecture read from
+    platform.machine() selects the release file name, so no request value reaches curl or dpkg:
+    both run as an argument list, never as a shell string. The 0600 temp file is always removed.
+    """
+    installed = cloudflared_available()
+    machine = platform.machine().lower()
+    arch = DEB_ARCHES.get(machine, "")
+    lines = [
+        "binary_before: " + ("yes" if installed else "no"),
+        "version: " + (cloudflared_version() if installed else "-"),
+        "package: " + ("cloudflared-linux-%s.deb" % arch if arch else "-"),
+        "service: " + tunnel_service_state(),
+    ]
+    if installed:
+        return True, "\n".join(lines)
+
+    def fail(message):
+        return False, "\n".join(lines + ["", message])
+
+    if not arch:
+        return fail("arsitektur tidak didukung: %s (paket resmi hanya linux amd64 dan arm64)" % (machine or "tidak dikenal"))
+    if not command_available(dpkg_cmd()):
+        return fail("dpkg tidak ada di host ini, paket .deb tidak bisa dipasang")
+
+    url = CLOUDFLARED_DEB_URL + "cloudflared-linux-%s.deb" % arch
+    handle, deb_path = tempfile.mkstemp(prefix="cloudflared-", suffix=".deb")
+    os.close(handle)
+    os.chmod(deb_path, 0o600)
+    try:
+        code, out = run(curl_cmd() + ["-fsSL", "-o", deb_path, url], timeout=INSTALL_TIMEOUT)
+        if code != 0:
+            return fail(out or "unduh paket cloudflared gagal")
+        code, out = run(dpkg_cmd() + ["-i", deb_path], timeout=INSTALL_TIMEOUT)
+        if code != 0:
+            return fail(out or "dpkg -i gagal")
+    finally:
+        try:
+            os.unlink(deb_path)
+        except OSError as exc:
+            log("gagal menghapus %s: %s" % (deb_path, exc))
+
+    lines[1] = "version: " + cloudflared_version()
+    lines[3] = "service: " + tunnel_service_state()
+    if not cloudflared_available():
+        return fail(out or "cloudflared belum ada setelah dpkg -i")
+    return True, "\n".join(lines)
+
 HANDLERS = {
     "service-status": action_service_status,
     "restart-service": action_restart_service,
@@ -562,6 +648,7 @@ HANDLERS = {
     "tunnel-restart": action_tunnel_restart,
     "tunnel-config": action_tunnel_config,
     "tunnel-logout": action_tunnel_logout,
+    "install-cloudflared": action_install_cloudflared,
 }
 
 

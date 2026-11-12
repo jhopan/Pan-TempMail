@@ -22,11 +22,13 @@
       padding:10px 12px;border-radius:8px;font-size:14px;width:100%}
     input:focus{border-color:var(--brand)}
     :focus-visible{outline:2px solid var(--brand);outline-offset:2px}
+    [hidden]{display:none!important}
     .err{background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.2);color:#fca5a5;
       padding:8px 12px;border-radius:8px;font-size:13px;display:none}
     .btn{width:100%;padding:12px;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;
       border:none;background:var(--brand-d);color:#fff;transition:.2s;min-height:44px}
     .btn:hover{background:#6d28d9}
+    .btn:disabled{opacity:.7;cursor:not-allowed}
     .credit{margin-top:24px;font-size:11px;color:var(--muted)}
     .credit b{color:var(--brand)}
   </style>
@@ -35,8 +37,8 @@
   <div class="card">
     <div class="logo">⚡</div>
     <h1>TempMail <small>By JhopanStore</small></h1>
-    <p class="sub">Masuk untuk membuka inbox dan panel kendali</p>
-    <form id="loginForm">
+    <p class="sub" id="sub">Menyiapkan halaman</p>
+    <form id="authForm" aria-busy="true" novalidate>
       <div>
         <label for="email">Email admin</label>
         <input id="email" type="email" required autocomplete="username" placeholder="nama@domain" />
@@ -45,39 +47,197 @@
         <label for="password">Password</label>
         <input id="password" type="password" required autocomplete="current-password" placeholder="password" />
       </div>
+      <div id="confirmField" hidden>
+        <label for="password2">Ulangi password</label>
+        <input id="password2" type="password" autocomplete="new-password" placeholder="ulangi password" />
+      </div>
       <div id="error" class="err" role="alert"></div>
-      <button type="submit" class="btn">Masuk</button>
+      <button type="submit" class="btn" id="submitBtn" disabled>Memuat...</button>
     </form>
     <div class="credit"><b>TempMail By JhopanStore</b>, credit JhopanStore</div>
   </div>
   <script>
     const token = localStorage.getItem('auth_token');
     if (token) window.location.href = '/app/';
-    document.getElementById('loginForm').addEventListener('submit', async (e) => {
-      e.preventDefault();
-      const email = document.getElementById('email').value;
-      const password = document.getElementById('password').value;
-      const errEl = document.getElementById('error');
-      errEl.style.display = 'none';
+
+    const form = document.getElementById('authForm');
+    const emailInput = document.getElementById('email');
+    const passwordInput = document.getElementById('password');
+    const confirmField = document.getElementById('confirmField');
+    const confirmInput = document.getElementById('password2');
+    const errorEl = document.getElementById('error');
+    const submitBtn = document.getElementById('submitBtn');
+    const subEl = document.getElementById('sub');
+
+    // mode: 'setup' saat belum ada user, 'login' sesudahnya. Selama status belum
+    // diketahui tombol tetap nonaktif supaya tidak ada kiriman ke mode yang salah.
+    let mode = 'login';
+
+    function showError(message) {
+      errorEl.textContent = message;
+      errorEl.style.display = 'block';
+    }
+
+    function hideError() {
+      errorEl.textContent = '';
+      errorEl.style.display = 'none';
+    }
+
+    function setBusy(busy, label) {
+      submitBtn.disabled = busy;
+      form.setAttribute('aria-busy', busy ? 'true' : 'false');
+      if (label) submitBtn.textContent = label;
+    }
+
+    function applyMode(needsSetup) {
+      mode = needsSetup ? 'setup' : 'login';
+      const isSetup = mode === 'setup';
+      subEl.textContent = isSetup
+        ? 'Buat admin pertama'
+        : 'Masuk untuk membuka inbox dan panel kendali';
+      document.title = (isSetup ? 'Buat admin pertama' : 'Masuk') + ', TempMail By JhopanStore';
+      confirmField.hidden = !isSetup;
+      confirmInput.required = isSetup;
+      confirmInput.value = '';
+      passwordInput.setAttribute('autocomplete', isSetup ? 'new-password' : 'current-password');
+      submitBtn.textContent = isSetup ? 'Buat admin' : 'Masuk';
+    }
+
+    function storeSession(data) {
+      localStorage.setItem('auth_token', data.token);
+      localStorage.setItem('auth_user', JSON.stringify(data.user));
+      window.location.href = '/app/';
+    }
+
+    // login() mengambil sesi dari server. Error jaringan ditandai offline agar
+    // pemanggil bisa membedakannya dari penolakan kredensial.
+    async function login(email, password) {
+      let res;
       try {
-        const res = await fetch('/api/auth/login', {
+        res = await fetch('/api/auth/login', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ email, password }),
         });
-        if (!res.ok) {
-          const err = await res.json();
-          throw new Error(err.error || 'Login gagal');
-        }
-        const data = await res.json();
-        localStorage.setItem('auth_token', data.token);
-        localStorage.setItem('auth_user', JSON.stringify(data.user));
-        window.location.href = '/app/';
       } catch (err) {
-        errEl.textContent = err.message;
-        errEl.style.display = 'block';
+        const offline = new Error('Tidak bisa menghubungi server. Periksa koneksi lalu coba lagi.');
+        offline.offline = true;
+        throw offline;
       }
+      if (!res.ok) {
+        if (res.status === 401) throw new Error('Email atau password salah');
+        if (res.status === 429) throw new Error('Terlalu banyak percobaan. Tunggu sebentar lalu coba lagi.');
+        let message = 'Login gagal. Coba lagi.';
+        try {
+          const body = await res.json();
+          if (body && body.error) message = body.error;
+        } catch (err) { /* respons tanpa JSON, pakai pesan bawaan */ }
+        throw new Error(message);
+      }
+      storeSession(await res.json());
+    }
+
+    // Memeriksa email dan password sebelum dikirim, dengan pesan Indonesia.
+    function checkCredentials(needConfirm) {
+      const email = emailInput.value.trim();
+      const password = passwordInput.value;
+      if (!email) return 'Email wajib diisi';
+      if (!emailInput.checkValidity()) return 'Format email tidak valid';
+      if (!password) return 'Password wajib diisi';
+      if (needConfirm) {
+        if (password.length < 6) return 'Password minimal 6 karakter';
+        if (password !== confirmInput.value) return 'Ulangi password tidak sama';
+      }
+      return '';
+    }
+
+    async function submitLogin() {
+      const problem = checkCredentials(false);
+      if (problem) {
+        showError(problem);
+        return;
+      }
+      hideError();
+      setBusy(true, 'Memeriksa...');
+      try {
+        await login(emailInput.value.trim(), passwordInput.value);
+      } catch (err) {
+        showError(err.message);
+      } finally {
+        setBusy(false, 'Masuk');
+      }
+    }
+
+    async function submitSetup() {
+      const problem = checkCredentials(true);
+      if (problem) {
+        showError(problem);
+        return;
+      }
+
+      hideError();
+      setBusy(true, 'Membuat admin...');
+      try {
+        const res = await fetch('/api/setup', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: emailInput.value.trim(), password: passwordInput.value }),
+        });
+        if (res.status === 409) {
+          // Admin sudah dibuat di tab lain. Kembali ke form masuk dan biarkan
+          // pengguna memakai kredensial yang baru saja dia isi.
+          applyMode(false);
+          showError('Admin sudah dibuat di tab atau perangkat lain. Silakan masuk dengan password itu.');
+          return;
+        }
+        if (!res.ok) {
+          showError(res.status === 400
+            ? 'Data tidak valid. Periksa email dan password minimal 6 karakter.'
+            : 'Gagal membuat admin. Coba lagi.');
+          return;
+        }
+
+        try {
+          await login(emailInput.value.trim(), passwordInput.value);
+        } catch (err) {
+          if (err.offline) throw err;
+          // Admin sudah ada, jadi form masuk yang benar untuk ditampilkan sekarang.
+          applyMode(false);
+          showError('Admin berhasil dibuat, tetapi login otomatis gagal. Silakan masuk dengan kredensial tadi.');
+        }
+      } catch (err) {
+        showError('Tidak bisa menghubungi server. Periksa koneksi lalu coba lagi.');
+      } finally {
+        setBusy(false, mode === 'setup' ? 'Buat admin' : 'Masuk');
+      }
+    }
+
+    form.addEventListener('submit', (e) => {
+      e.preventDefault();
+      if (submitBtn.disabled) return;
+      if (mode === 'setup') submitSetup();
+      else submitLogin();
     });
+
+    async function checkSetup() {
+      hideError();
+      try {
+        const res = await fetch('/api/setup', { headers: { Accept: 'application/json' } });
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        const data = await res.json();
+        applyMode(data.needs_setup === true);
+      } catch (err) {
+        // Status tidak diketahui: pertahankan form masuk yang lama dan biarkan
+        // pengguna mencoba login, bukan menampilkan form buat admin yang salah.
+        applyMode(false);
+        showError('Gagal memeriksa status setup. Masih bisa mencoba masuk, atau muat ulang halaman.');
+      } finally {
+        setBusy(false);
+        submitBtn.textContent = mode === 'setup' ? 'Buat admin' : 'Masuk';
+      }
+    }
+
+    checkSetup();
   </script>
 </body>
 </html>

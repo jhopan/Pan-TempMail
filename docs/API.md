@@ -518,7 +518,11 @@ requests go to the root helper through `/opt/tempmail/data/helper` (see `docs/RU
 
 Actions: `service-status`, `restart-service`, `backup-now`, `backup-list`, `logs`, `doctor`,
 `tunnel-status`, `tunnel-config`, `tunnel-install` (needs `token`), `tunnel-restart`,
-`tunnel-logout` (needs `confirm: "RESET"`).
+`tunnel-logout` (needs `confirm: "RESET"`), `install-cloudflared`.
+
+`install-cloudflared` takes no fields and installs the official `cloudflared-linux-<arch>.deb`
+package (`curl` + `dpkg -i`, amd64/arm64 only) when the binary is missing; it reports
+`binary_before`, `version`, `package`, `service` as `key: value` lines.
 
 `tunnel-config` and `backup-list` take no fields and always answer `ok: true`; they read
 `/etc/cloudflared/config.yml` (`HELPER_TUNNEL_CONFIG`) and the backup directory

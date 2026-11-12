@@ -58,8 +58,8 @@ cd receiver
 go test ./...
 go vet ./...
 
-# Local run (JWT_SECRET, EMAIL_API_KEY, and DOMAINS in .env are mandatory)
-cp ../.env.example .env   # first time only
+# Local run (no env needed: JWT_SECRET and EMAIL_API_KEY are generated into data/secrets.env at 0600)
+cp ../.env.example .env   # optional, only to override values
 go run .                  # UI at http://127.0.0.1:8080/app/
 
 # Windows local cross-builds (for testing, not for production)
@@ -92,19 +92,17 @@ sudo bash deploy/linux/install.sh
 cp /tmp/tempmail /opt/tempmail/tempmail
 chown tempmail:tempmail /opt/tempmail/tempmail
 
-# 4. Configure
-sudo nano /etc/tempmail/tempmail.env  # set PORT, DOMAINS, secrets
+# 4. Configure (optional: only PORT/DOMAINS/jaringan; rahasia dibuat otomatis)
+sudo nano /etc/tempmail/tempmail.env  # opsional, untuk menimpa PORT, DOMAINS, rahasia
 
 # 5. Start service
 sudo systemctl start tempmail
 
-# 6. Create admin
-curl -X POST http://127.0.0.1:8081/api/setup \
-  -H "Content-Type: application/json" \
-  -d '{"email":"your@email.com","password":"your-password"}'
+# 6. Buat admin pertama di browser (tidak perlu curl)
+#    http://<host>:8081/app/login.html  -> halaman menawarkan "Buat admin pertama"
+#    Alternatif CLI: POST /api/setup {"email","password"} hanya saat belum ada user.
 
-# 7. Cloudflare setup
-menutempmail → 8 (SETUP GUIDED)
+# 7. Cloudflare setup: buka /admin (panel) atau menutempmail → 8 (SETUP GUIDED)
 ```
 
 ## Code constraints

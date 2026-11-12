@@ -43,17 +43,18 @@ var processStart = time.Now()
 
 // helperActions is the contract allowlist; anything else is refused before a file is written.
 var helperActions = map[string]bool{
-	"service-status":  true,
-	"restart-service": true,
-	"backup-now":      true,
-	"backup-list":     true,
-	"logs":            true,
-	"doctor":          true,
-	"tunnel-status":   true,
-	"tunnel-config":   true,
-	"tunnel-install":  true,
-	"tunnel-restart":  true,
-	"tunnel-logout":   true,
+	"service-status":      true,
+	"restart-service":     true,
+	"backup-now":          true,
+	"backup-list":         true,
+	"logs":                true,
+	"doctor":              true,
+	"tunnel-status":       true,
+	"tunnel-config":       true,
+	"tunnel-install":      true,
+	"tunnel-restart":      true,
+	"tunnel-logout":       true,
+	"install-cloudflared": true,
 }
 
 // helperFireAndForget actions cut the app or the tunnel, so no result can ever be awaited.

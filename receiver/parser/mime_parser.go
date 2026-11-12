@@ -41,7 +41,9 @@ func ParseEmail(r io.Reader) (*ParsedEmail, error) {
 func parseParts(mr *mail.Reader, result *ParsedEmail) {
 	for {
 		part, err := mr.NextPart()
-		if err != nil { break }
+		if err != nil {
+			break
+		}
 		switch h := part.Header.(type) {
 		case *mail.InlineHeader:
 			contentType, params, _ := h.ContentType()
@@ -70,7 +72,9 @@ func parseParts(mr *mail.Reader, result *ParsedEmail) {
 func decodeHeader(s string) string {
 	dec := new(mime.WordDecoder)
 	decoded, err := dec.DecodeHeader(s)
-	if err != nil { return s }
+	if err != nil {
+		return s
+	}
 	return decoded
 }
 
@@ -84,12 +88,16 @@ func decodeBodyBytes(data []byte, encoding string) []byte {
 	case "base64":
 		decoded := make([]byte, base64.StdEncoding.DecodedLen(len(data)))
 		n, err := base64.StdEncoding.Decode(decoded, data)
-		if err != nil { return data }
+		if err != nil {
+			return data
+		}
 		return decoded[:n]
 	case "quoted-printable":
 		qpr := quotedprintable.NewReader(bytes.NewReader(data))
 		decoded, err := io.ReadAll(qpr)
-		if err != nil { return data }
+		if err != nil {
+			return data
+		}
 		return decoded
 	default:
 		return data
@@ -101,9 +109,13 @@ func convertCharset(s string, cs string) string {
 		return s
 	}
 	reader, err := charset.NewReader(strings.NewReader(s), "text/plain; charset="+cs)
-	if err != nil { return s }
+	if err != nil {
+		return s
+	}
 	converted, err := io.ReadAll(reader)
-	if err != nil { return s }
+	if err != nil {
+		return s
+	}
 	return string(converted)
 }
 

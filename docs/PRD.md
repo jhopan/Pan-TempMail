@@ -69,6 +69,7 @@ Empty destination list means OFF. A copy destination must be verified by Cloudfl
 
 ### TempMail app
 
+- `GET /api/setup` reports `needs_setup` (whether the users table is empty) so the login page can show the create-admin form.
 - `POST /api/setup` creates first admin only when no users exist.
 - `POST /api/auth/login` issues JWT.
 - `POST /api/inbox` creates/extends inbox.
@@ -115,7 +116,8 @@ Empty destination list means OFF. A copy destination must be verified by Cloudfl
 
 ## 7. Security requirements
 
-- `JWT_SECRET` required; never fallback to hardcoded secret.
+- `JWT_SECRET` dan `EMAIL_API_KEY` tidak punya nilai bawaan yang bisa ditebak. Kalau environment tidak menyetelnya, aplikasi membuat nilai acak sekali dan menyimpannya di `<data dir>/secrets.env` dengan izin 0600; nilai dari environment selalu menang, dan berkas yang tidak bisa ditulis membuat aplikasi berhenti dengan pesan yang jelas (bukan diam-diam memakai kunci sementara).
+- Alur pertama kali harus bisa diselesaikan dari browser: aplikasi dinyalakan, halaman login menawarkan pembuatan admin pertama, lalu seluruh setup Cloudflare dilakukan di panel. CLI hanya untuk menyalakan aplikasi, port, dan jaringan.
 - `EMAIL_API_KEY` must protect Worker receive endpoint.
 - Never commit credentials, database files, cloudflared credentials, token files, or built binaries.
 - Copies are explicit opt-in.

@@ -84,6 +84,6 @@ APP_PORT=${APP_PORT:-8080}
 curl -fsS "http://127.0.0.1:$APP_PORT/health"
 printf '\nReady. LAN UI: http://<device-lan-ip>:%s/app/\n' "$APP_PORT"
 printf 'Run sudo tempmailctl for guided Cloudflare/Tunnel/Worker setup.\n'
-printf 'Create first admin only once: POST /api/setup\n'
+printf 'Buat admin pertama di browser: http://127.0.0.1:%s/app/login.html (form "Buat admin pertama").\n' "$APP_PORT"
 printf 'Panel admin (/app/admin.html -> Server) bisa restart service, backup, log, dan tunnel.\n'
 printf 'Helper root: tempmail-root.path + tempmail-root.timer, spool %s/data/helper/in\n' "$ROOT"
