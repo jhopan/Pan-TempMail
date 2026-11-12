@@ -57,6 +57,19 @@ jobs:
             GOOS="$os" GOARCH="$arch" go build -ldflags="-X main.version=ci-smoke" -o "$out" .
           done
 
+      - name: Installer smoke (dry run)
+        run: |
+          # Menangkap kesalahan variabel/argumen tanpa menyentuh sistem: --dry-run tetap
+          # mengevaluasi deteksi OS, URL rilis, validasi port, dan validasi aset.
+          bash deploy/linux/install.sh --dry-run --os linux --arch amd64
+          bash deploy/linux/install.sh --dry-run --os linux --arch arm64
+          bash deploy/linux/install.sh --dry-run --os darwin --arch arm64
+          bash deploy/linux/install.sh --dry-run --os windows --arch amd64
+          bash deploy/linux/install.sh --dry-run --version v9.9.9
+          if bash deploy/linux/install.sh --dry-run --port 99999 >/dev/null 2>&1; then
+            echo "port tidak valid seharusnya ditolak"; exit 1
+          fi
+
       - name: JavaScript syntax
         run: |
           node --check receiver/web/static/admin.js
