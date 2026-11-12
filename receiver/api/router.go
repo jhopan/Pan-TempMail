@@ -201,8 +201,26 @@ func SetupRouter() *gin.Engine {
 	// Auth: X-Email-API-Key header (no JWT needed — service-to-service)
 	r.POST("/api/email/receive", handlers.ReceiveEmailViaHTTP)
 
-	// Static frontend (embedded HTML/JS/CSS)
-	r.StaticFS("/app", web.StaticFS())
+	// Static frontend (embedded HTML/JS/CSS). Everything revalidates, because a cached
+	// page from an earlier build would hide sections that the current scripts expect.
+	staticHandler := http.FileServer(web.StaticFS())
+	serveStatic := func(c *gin.Context) {
+		c.Header("Cache-Control", "no-cache, must-revalidate")
+		// The file server is rooted at the embedded directory, so the /app prefix must go.
+		trimmed := strings.TrimPrefix(c.Request.URL.Path, "/app")
+		if trimmed == "" {
+			trimmed = "/"
+		}
+		req := c.Request.Clone(c.Request.Context())
+		urlCopy := *req.URL
+		urlCopy.Path = trimmed
+		req.URL = &urlCopy
+		staticHandler.ServeHTTP(c.Writer, req)
+	}
+	r.GET("/app", serveStatic)
+	r.HEAD("/app", serveStatic)
+	r.GET("/app/*filepath", serveStatic)
+	r.HEAD("/app/*filepath", serveStatic)
 
 	// Root redirect to app
 	r.GET("/", func(c *gin.Context) {

@@ -33,8 +33,18 @@ function panelFromHash() {
 }
 
 function showPanel(name, options) {
-  const target = Object.prototype.hasOwnProperty.call(NAV_PANELS, name) ? name : NAV_DEFAULT;
-  navPanels.forEach((panel) => {
+  const domPanels = [...document.querySelectorAll("#panel .panel[data-panel]")];
+  const domNames = domPanels.map((panel) => panel.dataset.panel);
+  let target = Object.prototype.hasOwnProperty.call(NAV_PANELS, name) ? name : NAV_DEFAULT;
+  if (!domNames.includes(target)) {
+    // Markup yang dimuat browser lebih tua dari skrip ini: jangan biarkan layar kosong.
+    const fallback = domNames.includes(NAV_DEFAULT) ? NAV_DEFAULT : domNames[0];
+    if (fallback) {
+      stalePanelNotice(target);
+      target = fallback;
+    }
+  }
+  domPanels.forEach((panel) => {
     panel.hidden = panel.dataset.panel !== target;
   });
   navButtons.forEach((button) => {
@@ -44,7 +54,7 @@ function showPanel(name, options) {
       button.removeAttribute("aria-current");
     }
   });
-  const meta = NAV_PANELS[target];
+  const meta = NAV_PANELS[target] || [target, ""];
   viewTitle.textContent = meta[0];
   viewSub.textContent = meta[1];
   document.title = meta[0] + " - Panel TempMail By JhopanStore";
@@ -56,6 +66,33 @@ function showPanel(name, options) {
     }
   }
   closeDrawer();
+}
+
+// Hanya muncul kalau panel yang diminta tidak ada di markup (halaman dari cache lama).
+function stalePanelNotice(requested) {
+  if (document.getElementById("staleNotice")) return;
+  const box = document.createElement("div");
+  box.id = "staleNotice";
+  box.className = "state error";
+  box.setAttribute("role", "alert");
+  const text = document.createElement("div");
+  text.className = "state-text";
+  text.textContent = 'Panel "' + requested + '" belum ada di halaman ini, jadi halaman yang terbuka masih versi lama dari cache browser.';
+  const row = document.createElement("div");
+  row.className = "row-actions";
+  row.style.marginTop = "8px";
+  const reload = document.createElement("button");
+  reload.type = "button";
+  reload.className = "btn btn-p small";
+  reload.textContent = "Muat ulang halaman";
+  reload.addEventListener("click", () => window.location.reload());
+  row.append(reload);
+  box.append(text, row);
+  document.getElementById("panel").prepend(box);
+  if (!sessionStorage.getItem("adminStaleReload")) {
+    sessionStorage.setItem("adminStaleReload", "1");
+    setTimeout(() => window.location.reload(), 1200);
+  }
 }
 
 function openDrawer() {
@@ -178,6 +215,7 @@ function initNav() {
 
   showPanel(panelFromHash(), { silent: true });
   refreshHelperPill();
+  sessionStorage.removeItem("adminStaleReload");
   panelEl.dataset.navReady = "1";
 }
 

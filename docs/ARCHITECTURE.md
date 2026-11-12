@@ -181,6 +181,8 @@ Rules that keep this safe:
 - Ingestion is capped by `MAX_RAW_EMAIL_BYTES` (default 5 MiB) on both the Worker and SMTP paths; larger payloads get `413` before parsing.
 - When `WORKER_SIGNING_SECRET` is set, `/api/email/receive` also requires `X-Email-Signature: sha256=<hmac>` over the raw body, and the Worker receives the same value as the `TEMPMAIL_SIGNING_SECRET` binding during deploy. With the secret empty the endpoint only needs `EMAIL_API_KEY` and logs that once at the first request.
 - Static UI must call API routes under `/api/`; only SSE is outside `/api`.
+- Static assets under `/app` are served with `Cache-Control: no-cache, must-revalidate`, and every panel in `admin.html` is `hidden` except the default one, so a stale cached page cannot render as an empty screen when `admin-nav.js` asks for a panel it does not have. If a panel is missing from the markup, the panel script shows a notice and reloads once.
+- The Cloudflare zone overrides asset caching with `max-age=14400` for JS/CSS, so **bump `?v=N` in `index.html` and `admin.html` on every JS change**; otherwise a browser can keep an old script for four hours even though the origin already served the new one.
 - The tunnel hostname is web/API transport. It is not necessarily a temp-mail domain.
 - Email copies must remain optional and off by default.
 
