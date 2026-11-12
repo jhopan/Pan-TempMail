@@ -71,6 +71,7 @@ type systemStatus struct {
 		SeriesCapped      bool   `json:"series_capped"`
 	} `json:"db"`
 	App struct {
+		Version       string `json:"version"`
 		UptimeSeconds int64  `json:"uptime_seconds"`
 		RSSBytes      uint64 `json:"rss_bytes"`
 		GoVersion     string `json:"go_version"`
@@ -143,6 +144,9 @@ func TestSystemStatus(t *testing.T) {
 	}
 	if got.DB.Inboxes != 1 || got.DB.Messages != 2 || got.DB.Attachments != 0 {
 		t.Errorf("db counts = %+v, want 1 inbox, 2 messages, 0 attachments", got.DB)
+	}
+	if strings.TrimSpace(got.App.Version) == "" {
+		t.Error("app.version kosong: panel tidak bisa menampilkan versi biner yang jalan")
 	}
 	if got.DB.Bytes <= 0 {
 		t.Errorf("db.bytes = %d, want > 0", got.DB.Bytes)

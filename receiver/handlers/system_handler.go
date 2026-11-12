@@ -198,10 +198,11 @@ func systemStatusDB() gin.H {
 
 func systemStatusApp() gin.H {
 	return gin.H{
+		"version":        buildVersion(),
 		"uptime_seconds": int64(time.Since(processStart).Seconds()),
 		"rss_bytes":      rssBytes(),
 		"go_version":     runtime.Version(),
-		"site_name":      envOr("SITE_NAME", "TempMail"),
+		"site_name":      envOr("SITE_NAME", "Pan-TempMail"),
 		"port":           envOr("PORT", "8080"),
 	}
 }
