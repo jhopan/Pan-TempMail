@@ -1,21 +1,31 @@
 #!/usr/bin/env bash
-# TempMail universal ARM64 installer.
-# Run as root after copying this directory and a locally-built ARM64 binary.
+# TempMail installer for Debian/Ubuntu/Armbian (root).
+# Run as root from a repo checkout (or a directory that has the scripts + cloudflare-worker/),
+# with the binary path as the first argument. Defaults match the release asset names.
 set -euo pipefail
 
 ROOT=/opt/tempmail
 ENV_DIR=/etc/tempmail
 APP_USER=tempmail
-BINARY=${1:-./tempmail-linux-arm64}
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 REPO_ROOT=$(CDPATH= cd -- "$SCRIPT_DIR/../.." && pwd)
 
+if [ $# -ge 1 ]; then
+  BINARY=$1
+else
+  BINARY=""
+  for candidate in ./tempmail-linux-amd64 ./tempmail-linux-arm64 ./tempmail; do
+    if [ -x "$candidate" ]; then BINARY=$candidate; break; fi
+  done
+  [ -n "$BINARY" ] || BINARY=./tempmail-linux-amd64
+fi
+
 [ "$(id -u)" = 0 ] || { echo "Run as root"; exit 1; }
-[ -x "$BINARY" ] || { echo "Missing executable: $BINARY"; exit 1; }
+[ -x "$BINARY" ] || { echo "Missing executable: $BINARY (pass the binary path: bash install.sh /path/to/tempmail-linux-amd64)"; exit 1; }
 [ -f "$REPO_ROOT/cloudflare-worker/src/index.js" ] || { echo "Missing cloudflare-worker source beside deployment package"; exit 1; }
 
 apt-get update -qq
-apt-get install -y -qq sqlite3 ca-certificates curl python3
+apt-get install -y -qq sqlite3 ca-certificates curl python3 openssl
 id -u "$APP_USER" >/dev/null 2>&1 || useradd --system --home "$ROOT" --shell /usr/sbin/nologin "$APP_USER"
 
 install -d -o "$APP_USER" -g "$APP_USER" -m 0750 "$ROOT/data"
