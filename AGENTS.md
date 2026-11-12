@@ -131,7 +131,7 @@ menutempmail → 8 (SETUP GUIDED)
 - SMTP test/local mode listens on `:2525` (not 25) per `docs/ARCHITECTURE.md`.
 - `receiver/handler` (auth) and `receiver/handlers` (inbox/email) are separate packages; `receiver/events` exists only to break the `api ↔ handlers` import cycle.
 - Cloudflare Tunnel buffers SSE responses. Config must include `disableChunkedEncoding: true` in `config.yml`.
-- Cloudflare Email Routing enable fails if non-CF MX records exist. The panel's `unlock DNS` removes them; otherwise delete them in the Cloudflare dashboard first.
+- Cloudflare Email Routing enable fails if non-CF MX records exist. Delete them in the Cloudflare dashboard first, or use the panel's `Matikan CF` column deliberately: that action calls `DELETE /zones/{id}/email/routing/dns`, which disables Email Routing and removes its MX records, so mail stops until `Rapikan` recreates them.
 - Catch-all with a `worker` action only works through the Cloudflare API (`PUT /zones/{zone}/email/routing/rules/catch_all`), which the app already does.
 
 ## Cloudflare deployment facts
@@ -139,20 +139,28 @@ menutempmail → 8 (SETUP GUIDED)
 ```text
 Worker name:    tempmailbyjhopanstore (fixed, hardcoded)
 Tunnel name:    tempmailbyjhopanstore (fixed, hardcoded)
-wrangler.toml:  workers_dev=false, preview_urls=false, no [vars] section
-Secrets:        TEMPMAIL_SERVER_URL, TEMPMAIL_API_KEY, FORWARD_LIST (via wrangler secret put)
+wrangler.toml:  reference copy only (workers_dev=false, preview_urls=false); the app deploys the
+                Worker through the Cloudflare API, so no wrangler, no Node.js, and no login
+Secrets:        TEMPMAIL_SERVER_URL, TEMPMAIL_API_KEY, FORWARD_LIST set by deploy-worker via the API
 Tunnel config:  /etc/cloudflared/config.yml (disableChunkedEncoding: true for SSE)
-CF cert:        /root/.cloudflared/cert.pem
-Wrangler token: /root/.wrangler/config/default.toml (device auth)
+Cloudflare auth: one per-profile API token (see below). No wrangler login, no cloudflared tunnel login.
+Legacy artifacts on hosts installed before the API-token flow (kept, unused by current scripts):
+                /root/.cloudflared/cert.pem and /root/.cloudflared/<tunnel-id>.json (cert.pem mode
+                connector), /root/.wrangler/config/default.toml (wrangler device-auth token)
 ```
+
+Root helper `tunnel-config` reports which mode the running connector uses (`token` or
+`credentials-file`) without any Cloudflare API token, and the panel warns that `tunnel-logout`
+deletes both credential directories.
 
 ## Linux deployment facts
 
 ```text
 Binary:     /opt/tempmail/tempmail
-Worker dir:  /opt/tempmail/worker/ (wrangler.toml + src/)
-Config:      /etc/tempmail/tempmail.env (PORT, DOMAINS, JWT_SECRET, EMAIL_API_KEY, ADMIN_EMAIL, ADMIN_PASS)
-CF state:    /etc/tempmail/cloudflare-state.json
+Worker dir:  /opt/tempmail/worker/ (reference copy: wrangler.toml + src/)
+Config:      /etc/tempmail/tempmail.env (PORT, DOMAINS, JWT_SECRET, EMAIL_API_KEY, ADMIN_EMAIL)
+             Admin password is not stored; the menu asks for it at login.
+CF state:    /etc/tempmail/cloudflare-state.json (legacy import source only)
 Menu:        menutempmail (launches /usr/local/sbin/tempmailctl)
 DB:         /opt/tempmail/data/tempmail.db
 Port:       read from PORT in /etc/tempmail/tempmail.env (default 8081)
@@ -183,7 +191,10 @@ curl -fsS http://127.0.0.1:8081/health
 ```bash
 menutempmail
 # Choose 8 — SETUP GUIDED
-# Flow: deps -> minta domain/web host/Account ID/API token -> simpan profil cf-main -> buat tunnel + jalankan perintah konektor -> tambah domain + routing catch-all (unlock DNS) -> deploy Worker -> verifikasi health
+# Flow: deps -> minta domain/web host/Account ID/API token -> simpan profil -> buat tunnel lewat API +
+# pasang konektor dari perintah yang dikembalikan -> tambah domain + catch-all Email Routing ->
+# deploy Worker -> verifikasi health
+# Tanpa login Cloudflare sama sekali: tidak ada wrangler login maupun cloudflared tunnel login.
 ```
 
 ### SSH targets

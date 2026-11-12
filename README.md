@@ -262,28 +262,35 @@ Update rules at runtime via admin API → see [`docs/API.md`](docs/API.md).
   SQLite Backup    active
   API Key          your-api-key-here
 
-  ─── Cloudflare (Tunnel) ───
-  Login            ✓ login (cert.pem)
-  Tunnel Name      tempmailbyjhopanstore
-  Tunnel ID        your-tunnel-id
-  Tunnel Service   active
-  Email Routing    ON
-  Salinan Email    OFF
-
-  ─── Wrangler (Worker) ───
-  Login            ✓ login
-  Active Profile   wrangler-oauth
-  Worker           ✓ deployed
-  Profiles         1 profile
+  ─── Cloudflare ───
+  Profil Aktif     cf-main (token aktif)
+  Profil          1 profil
+  Domain          your-domain.com (routing ON)
+  Worker          ✓ deployed (per profil)
+  Tunnel          tempmailbyjhopanstore / 7e95f66b… / credentials-file
+  Konektor        cloudflared active
+  Email Routing   ON
+  Salinan Email   OFF
 ```
 
 Menu:
-- **1-7**: Manage CF profiles, domains, login, worker, routing, copies
-- **8**: SETUP GUIDED (one-shot all steps)
-- **9**: AUTO SETUP (step-by-step)
-- **A**: Kelola admin (create/view/reset password)
-- **L1-L4**: Logout/reset/delete worker
+- **1**: Kelola akun Cloudflare (profil + token per akun)
+- **2**: Kelola domain TempMail
+- **3**: Tempel API token profil (wajib untuk panel)
+- **4**: Setup tunnel Cloudflare (lewat API token)
+- **5**: Deploy/update Worker
+- **6**: Aktifkan Email Routing catch-all
+- **7**: Atur tujuan salinan email
+- **8**: SETUP GUIDED (satu jalan semua langkah)
+- **9**: AUTO SETUP (bertahap)
+- **A**: Kelola admin (buat/cek/reset password)
+- **D**: Doctor (cek semua status)
+- **L2-L4**: Logout tunnel / reset credential Cloudflare / hapus Worker
 - **10**: Refresh
+
+Tidak ada `wrangler login` dan tidak ada `cloudflared tunnel login` di menu mana pun: akses Cloudflare
+memakai satu API token per akun, dan konektor tunnel dipasang dari token konektor yang dikembalikan
+API. Login yang tersisa hanya login ke aplikasi ini (email + password admin).
 
 ---
 
@@ -348,11 +355,13 @@ menutempmail → 2  (add domain B)
 Only **3 steps**. No login, no tunnel, no worker re-deploy needed. Email Routing for B is enabled automatically; everything else already exists.
 
 ```text
-== [2/7] Login Wrangler       == → Skip (already logged in)
-== [3/7] Login CF Tunnel      == → Skip (cert.pem exists)
-== [4/7] Buat tunnel + DNS    == → Skip (tunnel exists)
-== [5/7] Deploy worker        == → Skip (worker deployed)
-== [6/7] Email Routing (B)    == → ✅ NEW — enable catch-all *@domain-b.com
+== [1/7] Periksa prasyarat      == → cloudflared, sqlite3, python3, health app
+== [2/7] Kredensial Cloudflare  == → API token (prompt / env / --api-token); tidak ada login browser
+== [3/7] Login ke aplikasi      == → email + password admin aplikasi ini (bukan Cloudflare)
+== [4/7] Profil Cloudflare      == → profil + token disimpan terenkripsi, langsung diaktifkan
+== [5/7] Tunnel + konektor      == → tunnel dibuat lewat API, konektor dipasang dari token konektor
+== [6/7] Domain + Email Routing == → domain + catch-all *@domain-b.com
+== [7/7] Deploy Worker + verifikasi == → Worker diunggah lewat API, lalu /health dicek
 ```
 
 #### Case 2: Domain B on a DIFFERENT Cloudflare account
@@ -403,7 +412,8 @@ Web   → tempmail.domain-a.com/app/   (unchanged)
 | **Profile (CF A / CF B)** | Saved account data: label, Account ID, encrypted API token | Multiple allowed, never expire |
 | **Active profile** | Which profile the panel uses by default | Switch anytime from the panel or menu |
 | **Worker** | Per-account script `tempmailbyjhopanstore` | Deployed through the Cloudflare API, no `wrangler` needed |
-| **Wrangler login** | Legacy OAuth token used only by the old `setup.sh` flow | Not needed for multi-account anymore |
+| **Wrangler login** | OAuth device login from the old pre-API-token flow | Not used at all now: no script or menu option runs it. If `/root/.wrangler/config/default.toml` still exists on a host, it is dead weight from the old setup. |
+| **Tunnel login (cert.pem)** | Browser login from the old flow that writes `/root/.cloudflared/cert.pem` | Not used by the current scripts. The running connector may still rely on it (`mode: credentials-file` in the panel); `tunnel-logout` deletes it, so use `tunnel-install` with a connector token if you ever need it back. |
 
 Each profile carries its own API token, so switching accounts is a profile switch, never a re-login.
 
