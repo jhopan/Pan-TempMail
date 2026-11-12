@@ -13,6 +13,8 @@
 #   bash install.sh --os windows --dry-run
 set -euo pipefail
 
+REPO="${PAN_TM_REPO:-jhopan/Pan-TempMail}"
+TOKEN="${PAN_TM_TOKEN:-}"
 REL_BASE="https://github.com/${REPO}/releases"
 APP_NAME="Pan-TempMail"
 SITE_NAME="Pan-TempMail"
@@ -32,8 +34,6 @@ DRY_RUN=0
 NO_SERVICE=0
 UPDATE=0
 FROM_FILE=""
-REPO="${PAN_TM_REPO:-jhopan/Pan-TempMail}"
-TOKEN="${PAN_TM_TOKEN:-}"
 
 usage() {
   cat <<'TXT'
